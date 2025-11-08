@@ -28,11 +28,13 @@ class AIHandler:
         Fontos: Ha a kapott kép minősége túl alacsony ahhoz, hogy egy kritikus részletet
         (pl. egy gomb feliratát) elolvass, akkor ne tippelj! Használd a
         'kerj_jobb_minosegu_kepet' parancsot, és kérj egy részletesebb képet.
-        Minden lépés után kaphatsz visszajelzést az előző parancsod eredményéről. Ha egy
-        parancs sikertelen volt, KÖTELEZŐ egy másik stratégiát választanod! Például, ha az
-        'indits_programot' parancs elbukik, mert a program nem található, akkor a
-        következő lépésben próbáld meg vizuálisan megkeresni a program ikonját a képernyőn
-        a 'kattints' paranccsal.
+        Az eredeti feladat mellett kapsz egy 'Előzmények' szekciót is, ami leírja, hol tart a
+        folyamat. A következő lépést mindig az eredeti cél és az eddigi előzmények alapján
+        határozd meg! Minden lépés után kaphatsz visszajelzést az előző parancsod
+        eredményéről. Ha egy parancs sikertelen volt, KÖTELEZŐ egy másik stratégiát
+        választanod! Például, ha az 'indits_programot' parancs elbukik, mert a program nem
+        található, akkor a következő lépésben próbáld meg vizuálisan megkeresni a program
+        ikonját a képernyőn a 'kattints' paranccsal.
         """
         self.system_prompt_calibration = """
         Te egy precíz vizuális elem felismerő asszisztens vagy. A feladatod, hogy egyetlen,
@@ -49,7 +51,7 @@ class AIHandler:
         screen_info: dict | None,
         available_plugins: list[dict[str, str]] | None = None,
         detail_level: str = "low",
-        feedback: str = "",
+        history: str = "",
     ) -> dict:
         print("🧠 AI gondolkodik...")
         try:
@@ -61,10 +63,6 @@ class AIHandler:
                 ]
                 plugins_text = "\n".join(plugin_lines)
 
-            feedback_text = (
-                f"Visszajelzés az előző lépésről: {feedback}. " if feedback else ""
-            )
-
             image_data = screen_info.get("image_data", "") if isinstance(screen_info, dict) else ""
             image_width = screen_info.get("width", 0) if isinstance(screen_info, dict) else 0
             image_height = screen_info.get("height", 0) if isinstance(screen_info, dict) else 0
@@ -73,7 +71,7 @@ class AIHandler:
                 print("\n--- AI PROMPT KÜLDÉSE ---")
                 print("SZÖVEGES PROMPT:")
                 print(f"    Feladat: '{user_prompt}'")
-                print(f"    Visszajelzés: '{feedback if feedback else 'Nincs'}'")
+                print(f"    Előzmények: {history if history else 'Nincs'}")
                 print(f"    Pluginek: {plugins_text}")
                 print(f"KÉP ADAT (hossz): {len(image_data)} karakter")
                 print(f"    KÉP MÉRET: {image_width}x{image_height}")
@@ -90,8 +88,9 @@ class AIHandler:
                             {
                                 "type": "text",
                                 "text": (
-                                    f"Feladat: '{user_prompt}'. A mellékelt kép mérete {image_width}x{image_height} pixel. "
-                                    f"{feedback_text}A pluginek: {plugins_text}. "
+                                    f"Eredeti Feladat: '{user_prompt}'.\n{history}\n\n"
+                                    f"A mellékelt kép mérete {image_width}x{image_height} pixel. "
+                                    f"A pluginek: {plugins_text}. "
                                     "Mi a következő lépés?"
                                 ),
                             },
