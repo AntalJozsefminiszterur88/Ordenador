@@ -36,13 +36,20 @@ class AIHandler:
         található, akkor a következő lépésben próbáld meg vizuálisan megkeresni a program
         ikonját a képernyőn a 'kattints' paranccsal.
         """
-        self.system_prompt_calibration = """
-        Te egy precíz vizuális elem felismerő asszisztens vagy. A feladatod, hogy egyetlen,
-        specifikus elemet találj meg a képernyőn, és visszaadd a pontos koordinátáit és a nevét
-        JSON formátumban a 'kattints' parancs segítségével. A koordinátákat a kapott
-        (lekicsinyített) képhez viszonyítva add meg. KÖTELEZŐ megadnod a 'leiras' mezőt
-        a megtalált elem nevével.
-        Példa válasz: {"command": "kattints", "arguments": {"x": 50, "y": 1050, "leiras": "Start Menü"}}
+        self.system_prompt_grid_calibration = """
+        Te egy precíz vizuális elem felismerő vagy. Egy képernyőképet kapsz, amin egy kalibrációs
+        rács látható feliratozott célpontokkal (A, B, C, stb.). A feladatod, hogy az ÖSSZES LÁTHATÓ
+        célpontot azonosítsd, és visszaadd a pozícióikat a lekicsinyített kép koordináta-
+        rendszerében. A választ egy JSON listaként add vissza, ahol minden elem egy szótár,
+        ami tartalmazza a pont 'label' (címke) és 'coords' (koordináták) mezőit.
+        Példa válasz:
+        [
+          {"label": "A", "coords": {"x": 50, "y": 50}},
+          {"label": "B", "coords": {"x": 950, "y": 50}},
+          {"label": "C", "coords": {"x": 950, "y": 950}},
+          {"label": "D", "coords": {"x": 50, "y": 950}},
+          {"label": "E", "coords": {"x": 500, "y": 500}}
+        ]
         """
 
     def get_ai_decision(
@@ -116,30 +123,23 @@ class AIHandler:
             print(f"Hiba az API hívás során: {e}")
             return {"command": "api_hiba", "arguments": {"hiba_uzenet": str(e)}}
 
-    def get_calibration_coordinates(self, screen_info: dict, element_to_find: str) -> dict:
-        print(f"🔬 Elem keresése kalibrációhoz: {element_to_find}...")
+    def get_grid_calibration_points(self, screen_info: dict) -> list:
+        print("🔬 Kalibrációs rács elemzése...")
         image_data = screen_info.get("image_data", "") if isinstance(screen_info, dict) else ""
         image_width = screen_info.get("width", 0) if isinstance(screen_info, dict) else 0
         image_height = screen_info.get("height", 0) if isinstance(screen_info, dict) else 0
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": self.system_prompt_calibration},
+                    {"role": "system", "content": self.system_prompt_grid_calibration},
                     {
                         "role": "user",
                         "content": [
                             {
                                 "type": "text",
-                                "text": (
-                                    "Feladat: Keresd meg a '{element}' elemet a képernyőn. "
-                                    "A kép mérete {width}x{height} pixel."
-                                ).format(
-                                    element=element_to_find,
-                                    width=image_width,
-                                    height=image_height,
-                                ),
+                                "text": "Feladat: Azonosítsd az összes feliratozott célpontot a képen.",
                             },
                             {
                                 "type": "image_url",
@@ -153,7 +153,15 @@ class AIHandler:
                 ],
                 response_format={"type": "json_object"},
             )
-            return json.loads(response.choices[0].message.content)
+            result_data = json.loads(response.choices[0].message.content)
+            if isinstance(result_data, list):
+                return result_data
+            if isinstance(result_data, dict):
+                for key in result_data:
+                    value = result_data[key]
+                    if isinstance(value, list):
+                        return value
+            return []
         except Exception as e:  # pragma: no cover - defensive logging
-            print(f"Hiba a kalibrációs API hívás során: {e}")
-            return {"command": "api_hiba", "arguments": {"hiba_uzenet": str(e)}}
+            print(f"Hiba a rács kalibráció során: {e}")
+            return []
