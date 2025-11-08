@@ -1,26 +1,17 @@
-"""Application main window built with PySide6."""
-
-from __future__ import annotations
+# src/gui/main_window.py
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
-    QApplication,
-    QInputDialog,
-    QLineEdit,
-    QMainWindow,
-    QPushButton,
-    QStyle,
-    QSystemTrayIcon,
-    QVBoxLayout,
-    QWidget,
+    QApplication, QInputDialog, QLineEdit, QMainWindow,
+    QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
 )
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QStyle
 
 from src.assistant import DesktopAssistant
 from src.gui.click_interceptor import ClickInterceptor
 from src.gui.overlay_window import OverlayWindow
 from src.memory_handler import MemoryHandler
-
 
 class MainWindow(QMainWindow):
     """Simple main window with a tray icon toggle."""
@@ -29,179 +20,97 @@ class MainWindow(QMainWindow):
     start_calibration_requested = Signal()
     stop_task_requested = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
         self.setWindowTitle("Ordenador")
 
-        self.assistant: DesktopAssistant | None = None
-        self.assistant_thread: QThread | None = None
-        self.click_interceptor: ClickInterceptor | None = None
+        self.assistant = None
+        self.assistant_thread = None
+        self.click_interceptor = None
         self.memory_handler = MemoryHandler()
 
         self._setup_ui()
-        self._setup_tray_icon()
-        self._setup_overlay()
+        self.overlay = OverlayWindow(self)
+        self.tray_icon = QSystemTrayIcon(self)
+        self._setup_connections()
 
-    def _setup_ui(self) -> None:
-        """Create the central widget layout."""
-
+    def _setup_ui(self):
         central_widget = QWidget(self)
+        self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
 
-        self.input_field = QLineEdit(self)
-        self.input_field.setPlaceholderText("Mit szeretnél tenni?")
+        self.input_field = QLineEdit(placeholderText="Mit szeretnél tenni?")
+        self.start_button = QPushButton("Indítás")
+        self.training_button = QPushButton("Elem tanítása")
+        self.calibration_button = QPushButton("Kalibráció")
+
         layout.addWidget(self.input_field)
-
-        self.start_button = QPushButton("Indítás", self)
-        self.start_button.clicked.connect(self._on_start_clicked)
         layout.addWidget(self.start_button)
-
-        self.training_button = QPushButton("Elem tanítása", self)
-        self.training_button.clicked.connect(self._on_train_element_clicked)
         layout.addWidget(self.training_button)
-
-        self.calibration_button = QPushButton("Kalibráció", self)
-        self.calibration_button.clicked.connect(self._on_start_calibration)
         layout.addWidget(self.calibration_button)
 
-        central_widget.setLayout(layout)
-        self.setCentralWidget(central_widget)
-
-    def _setup_tray_icon(self) -> None:
-        """Configure the system tray icon used to restore the window."""
-
-        icon = self._default_icon()
-        self.tray_icon = QSystemTrayIcon(icon, self)
-        self.tray_icon.setToolTip("Ordenador fut a háttérben")
+    def _setup_connections(self):
+        self.start_button.clicked.connect(self._on_start_clicked)
+        self.training_button.clicked.connect(self._on_train_element_clicked)
+        self.calibration_button.clicked.connect(self._on_start_calibration)
         self.tray_icon.activated.connect(self._on_tray_icon_activated)
-        self.tray_icon.hide()
+        self.overlay.stop_button.clicked.connect(self.stop_task_requested.emit)
 
-    def _setup_overlay(self) -> None:
-        """Create the floating overlay window used during task execution."""
-
-        self.overlay = OverlayWindow(self)
-        self.overlay.stop_button.clicked.connect(self._on_stop_clicked)
-
-    def _on_start_clicked(self) -> None:
-        """Hide the main window, show overlay and run the assistant task."""
-
-        command = self.input_field.text().strip()
-        if not command:
+    def _prepare_and_run_task(self, task_function, *args):
+        if self.assistant_thread and self.assistant_thread.isRunning():
             return
 
-        if not self.tray_icon.icon().isNull():
-            self.tray_icon.show()
-        else:
-            self.tray_icon.setIcon(self._default_icon())
-            self.tray_icon.show()
-
-        self._prepare_overlay()
         self.hide()
-
-        self._start_assistant(command)
-
-    def _on_start_calibration(self) -> None:
-        """Launch the automated calibration flow."""
-
-        if self.assistant_thread is not None and self.assistant_thread.isRunning():
-            return
-
-        if not self.tray_icon.icon().isNull():
-            self.tray_icon.show()
-        else:
-            self.tray_icon.setIcon(self._default_icon())
-            self.tray_icon.show()
-
-        self._prepare_overlay()
-        self.hide()
-
-        self._start_calibration()
-
-    def _on_tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        """Restore the main window when the tray icon is clicked."""
-
-        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
-            self.showNormal()
-            self.raise_()
-            self.activateWindow()
-            self.tray_icon.hide()
-
-    def _prepare_overlay(self) -> None:
-        """Reset and display the overlay window at the right edge of the screen."""
-
-        self.overlay.progress_bar.setValue(0)
-        self.overlay.status_label.clear()
-        self.overlay.log_list.clear()
-
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray_icon.show()
+        self.overlay.prepare_ui()
         self.overlay.show()
-        self.overlay.raise_()
-        self._position_overlay()
 
-    def _position_overlay(self) -> None:
-        """Position the overlay at the vertical centre of the right screen edge."""
-
-        screen = QGuiApplication.primaryScreen()
-        if screen is None:
-            return
-
-        geometry = screen.availableGeometry()
-        self.overlay.adjustSize()
-        window_size = self.overlay.size()
-        x = geometry.right() - window_size.width() - 24
-        y = geometry.top() + (geometry.height() - window_size.height()) // 2
-        self.overlay.move(max(geometry.left(), x), max(geometry.top(), y))
-
-    def _start_assistant(self, command: str) -> None:
-        """Create the assistant worker and start it on a background thread."""
-
-        if not self._ensure_assistant_worker():
-            return
-
-        self.start_task_requested.emit(command)
-
-    def _start_calibration(self) -> None:
-        """Ensure the assistant worker exists and trigger calibration."""
-
-        if not self._ensure_assistant_worker():
-            return
-
-        self.start_calibration_requested.emit()
-
-    def _ensure_assistant_worker(self) -> bool:
-        """Initialise the assistant worker thread if it is not already running."""
-
-        if self.assistant_thread is not None and self.assistant_thread.isRunning():
-            return False
-
-        self.assistant_thread = QThread(self)
+        self.assistant_thread = QThread()
         self.assistant = DesktopAssistant()
         self.assistant.moveToThread(self.assistant_thread)
 
-        self.start_task_requested.connect(self.assistant.start_task, Qt.QueuedConnection)
-        self.start_calibration_requested.connect(
-            self.assistant.start_calibration_task, Qt.QueuedConnection
-        )
-        self.stop_task_requested.connect(self.assistant.request_stop, Qt.QueuedConnection)
+        # Connect signals
         self.assistant.status_updated.connect(self.overlay.status_label.setText)
         self.assistant.progress_updated.connect(self.overlay.progress_bar.setValue)
         self.assistant.log_message.connect(self.overlay.log_list.addItem)
         self.assistant.task_finished.connect(self._on_task_finished)
-        self.assistant.task_finished.connect(self.assistant_thread.quit)
-        self.assistant_thread.finished.connect(self._cleanup_assistant)
+        self.stop_task_requested.connect(self.assistant.request_stop)
+
+        # Connect the correct starter signal to the correct slot
+        if task_function == "start_task":
+            self.start_task_requested.connect(self.assistant.start_task)
+            self.assistant_thread.started.connect(lambda: self.start_task_requested.emit(*args))
+        elif task_function == "start_calibration":
+            self.start_calibration_requested.connect(self.assistant.start_calibration_task)
+            self.assistant_thread.started.connect(self.start_calibration_requested.emit)
+
+        self.assistant_thread.finished.connect(self.assistant.deleteLater)
+        self.assistant_thread.finished.connect(self.assistant_thread.deleteLater)
 
         self.assistant_thread.start()
-        return True
 
-    def _on_task_finished(self) -> None:
-        """Handle assistant completion by restoring the main window."""
+    def _on_start_clicked(self):
+        command = self.input_field.text().strip()
+        if command:
+            self._prepare_and_run_task("start_task", command)
+
+    def _on_start_calibration(self):
+        self._prepare_and_run_task("start_calibration")
+
+    def _on_task_finished(self):
+        if self.assistant_thread:
+            self.assistant_thread.quit()
+            self.assistant_thread.wait()
 
         self.overlay.hide()
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
         self.tray_icon.hide()
+        self.showNormal()
+        self.activateWindow()
+
+    def _on_tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._on_task_finished()
 
     def _on_train_element_clicked(self) -> None:
         """Start the interactive element training flow."""
@@ -252,42 +161,3 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.tray_icon.hide()
-
-    def _cleanup_assistant(self) -> None:
-        """Disconnect signals and delete the worker/thread objects."""
-
-        if self.assistant is not None:
-            try:
-                self.start_task_requested.disconnect(self.assistant.start_task)
-            except (TypeError, RuntimeError):
-                pass
-            try:
-                self.start_calibration_requested.disconnect(
-                    self.assistant.start_calibration_task
-                )
-            except (TypeError, RuntimeError):
-                pass
-            try:
-                self.stop_task_requested.disconnect(self.assistant.request_stop)
-            except (TypeError, RuntimeError):
-                pass
-            self.assistant.deleteLater()
-            self.assistant = None
-
-        if self.assistant_thread is not None:
-            self.assistant_thread.deleteLater()
-            self.assistant_thread = None
-
-    @staticmethod
-    def _default_icon() -> QIcon:
-        """Return a default application icon from the current style."""
-
-        app = QApplication.instance()
-        if app is not None:
-            return app.style().standardIcon(QStyle.SP_ComputerIcon)
-        return QIcon()
-
-    def _on_stop_clicked(self) -> None:
-        """Allow the user to request task interruption from the overlay."""
-
-        self.stop_task_requested.emit()
