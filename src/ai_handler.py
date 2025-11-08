@@ -1,7 +1,7 @@
 # src/ai_handler.py
 import json
 from openai import OpenAI
-from src.config import OPENAI_API_KEY
+from src.config import OPENAI_API_KEY, DEBUG_MODE
 
 class AIHandler:
     def __init__(self):
@@ -51,6 +51,16 @@ class AIHandler:
                 f"Visszajelzés az előző lépésről: {feedback}. " if feedback else ""
             )
 
+            if DEBUG_MODE:
+                print("\n--- AI PROMPT KÜLDÉSE ---")
+                print("SZÖVEGES PROMPT:")
+                print(f"    Feladat: '{user_prompt}'")
+                print(f"    Visszajelzés: '{feedback if feedback else 'Nincs'}'")
+                print(f"    Pluginek: {plugins_text}")
+                print(f"KÉP ADAT (hossz): {len(screen_state)} karakter")
+                print(f"KÉP MINŐSÉG: {detail_level}")
+                print("--------------------------")
+
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -78,6 +88,10 @@ class AIHandler:
                 response_format={"type": "json_object"}
             )
             decision_str = response.choices[0].message.content
+            if DEBUG_MODE:
+                print("\n--- NYERS AI VÁLASZ ---")
+                print(decision_str)
+                print("----------------------")
             return json.loads(decision_str)
         except Exception as e:
             print(f"Hiba az API hívás során: {e}")

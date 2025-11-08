@@ -11,6 +11,7 @@ from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
 from src.plugin_handler import PluginHandler
 from src.memory_handler import MemoryHandler
+from src.config import DEBUG_MODE
 
 
 class DesktopAssistant(QObject):
@@ -67,6 +68,16 @@ class DesktopAssistant(QObject):
 
             while not self._stop_requested and self.failure_counter < self.max_failures:
                 iteration += 1
+
+                if DEBUG_MODE:
+                    print("\n" + "=" * 20 + f" CIKLUS #{iteration} " + "=" * 20)
+                    print(f"HIBA SZÁMLÁLÓ: {self.failure_counter}/{self.max_failures}")
+                    print(f"KÉP MINŐSÉG A KÖR ELEJÉN: {detail_level}")
+                    print(
+                        "VISSZAJELZÉS AZ AI-NAK: '"
+                        f"{feedback_for_ai if feedback_for_ai else 'Nincs'}'"
+                    )
+                    print("=" * 55)
 
                 if self._check_for_stop():
                     break
