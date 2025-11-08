@@ -60,6 +60,12 @@ class OverlayWindow(QWidget):
 
         self.setLayout(layout)
 
+    def prepare_ui(self):
+        """Resets the UI elements to their initial state."""
+        self.progress_bar.setValue(0)
+        self.status_label.clear()
+        self.log_list.clear()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API naming convention
         """Store the offset when the user starts dragging the window."""
 
