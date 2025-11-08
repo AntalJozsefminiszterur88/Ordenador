@@ -26,6 +26,7 @@ class MainWindow(QMainWindow):
     """Simple main window with a tray icon toggle."""
 
     start_task_requested = Signal(str)
+    stop_task_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         """Create the floating overlay window used during task execution."""
 
         self.overlay = OverlayWindow(self)
+        self.overlay.stop_button.clicked.connect(self._on_stop_clicked)
 
     def _on_start_clicked(self) -> None:
         """Hide the main window, show overlay and run the assistant task."""
@@ -140,6 +142,7 @@ class MainWindow(QMainWindow):
         self.assistant.moveToThread(self.assistant_thread)
 
         self.start_task_requested.connect(self.assistant.start_task, Qt.QueuedConnection)
+        self.stop_task_requested.connect(self.assistant.request_stop, Qt.QueuedConnection)
         self.assistant.status_updated.connect(self.overlay.status_label.setText)
         self.assistant.progress_updated.connect(self.overlay.progress_bar.setValue)
         self.assistant.log_message.connect(self.overlay.log_list.addItem)
@@ -217,6 +220,10 @@ class MainWindow(QMainWindow):
                 self.start_task_requested.disconnect(self.assistant.start_task)
             except (TypeError, RuntimeError):
                 pass
+            try:
+                self.stop_task_requested.disconnect(self.assistant.request_stop)
+            except (TypeError, RuntimeError):
+                pass
             self.assistant.deleteLater()
             self.assistant = None
 
@@ -232,3 +239,8 @@ class MainWindow(QMainWindow):
         if app is not None:
             return app.style().standardIcon(QStyle.SP_ComputerIcon)
         return QIcon()
+
+    def _on_stop_clicked(self) -> None:
+        """Allow the user to request task interruption from the overlay."""
+
+        self.stop_task_requested.emit()

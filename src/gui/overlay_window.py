@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QLabel, QListWidget, QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class OverlayWindow(QWidget):
@@ -42,6 +50,13 @@ class OverlayWindow(QWidget):
 
         self.log_list = QListWidget(self)
         layout.addWidget(self.log_list)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.stop_button = QPushButton("Stop", self)
+        self.stop_button.setObjectName("overlayStopButton")
+        button_layout.addWidget(self.stop_button)
+        layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
