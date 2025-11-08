@@ -59,7 +59,7 @@ class ComputerInterface:
         except Exception as exc:  # pragma: no cover - vizuális környezet hiánya esetén
             print(f"A kattintás végrehajtása nem sikerült: {exc}")
 
-    def execute_command(self, command: str, arguments: dict) -> None:
+    def execute_command(self, command: str, arguments: dict) -> dict:
         """Valódi parancsok végrehajtása PyAutoGUI és subprocess segítségével."""
 
         args = arguments if isinstance(arguments, dict) else {}
@@ -69,47 +69,64 @@ class ComputerInterface:
             y = args.get("y")
             if isinstance(x, (int, float)) and isinstance(y, (int, float)):
                 self.click_at(int(x), int(y), args.get("description"))
-            else:
-                print("A 'kattints' parancshoz érvényes x és y koordináták szükségesek.")
-            return
+                return {"success": True}
+            print("A 'kattints' parancshoz érvényes x és y koordináták szükségesek.")
+            return {
+                "success": False,
+                "error": "A 'kattints' parancshoz érvényes x és y koordináták szükségesek.",
+            }
 
         if command == "gepelj":
             text = args.get("szoveg") or args.get("text") or ""
             if not isinstance(text, str):
-                print("A 'gepelj' parancshoz szöveg szükséges.")
-                return
+                error_message = "A 'gepelj' parancshoz szöveg szükséges."
+                print(error_message)
+                return {"success": False, "error": error_message}
             try:
                 pyautogui.typewrite(text)
             except Exception as exc:  # pragma: no cover - vizuális környezet hiánya esetén
-                print(f"A gépelés nem sikerült: {exc}")
-            return
+                error_message = f"A gépelés nem sikerült: {exc}"
+                print(error_message)
+                return {"success": False, "error": error_message}
+            return {"success": True}
 
         if command == "indits_programot":
-            program = (
-                args.get("program")
+            program_nev = (
+                args.get("program_nev")
+                or args.get("program")
                 or args.get("path")
                 or args.get("command")
                 or args.get("exe")
             )
+
+            if not program_nev:
+                return {"success": False, "error": "A program_nev megadása kötelező."}
+
+            if isinstance(program_nev, Sequence) and not isinstance(program_nev, str):
+                command_sequence = list(program_nev)
+            else:
+                command_sequence = [str(program_nev)]
+
             extra_args = args.get("args")
             if isinstance(extra_args, str):
-                extra_args = [extra_args]
-            if isinstance(extra_args, Sequence):
-                extra_args = list(extra_args)
-            else:
-                extra_args = []
+                command_sequence.append(extra_args)
+            elif isinstance(extra_args, Sequence):
+                command_sequence.extend(str(arg) for arg in extra_args)
 
-            if isinstance(program, str) and program.strip():
-                command_list = [program.strip(), *extra_args]
-                try:
-                    subprocess.Popen(command_list)
-                except Exception as exc:  # pragma: no cover - rendszerfüggő hibák
-                    print(f"A program indítása nem sikerült: {exc}")
-            else:
-                print("Az 'indits_programot' parancshoz érvényes program elérési út szükséges.")
-            return
+            try:
+                subprocess.Popen(command_sequence)
+                return {"success": True}
+            except FileNotFoundError:
+                program_display = command_sequence[0] if command_sequence else program_nev
+                return {
+                    "success": False,
+                    "error": f"A(z) '{program_display}' program nem található.",
+                }
+            except Exception as exc:  # pragma: no cover - rendszerfüggő hibák
+                return {"success": False, "error": str(exc)}
 
         print(f"Ismeretlen parancs: {command} {arguments}")
+        return {"success": False, "error": f"Ismeretlen parancs: {command}"}
 
     def _display_click_indicator(self, x: int, y: int) -> None:
         """Display the click indicator centred on the provided coordinates."""

@@ -63,6 +63,7 @@ class DesktopAssistant(QObject):
             detail_level = "low"
 
             self.failure_counter = 0
+            feedback_for_ai = ""
 
             while not self._stop_requested and self.failure_counter < self.max_failures:
                 iteration += 1
@@ -86,7 +87,9 @@ class DesktopAssistant(QObject):
                     screen_state,
                     available_plugins,
                     detail_level=detail_level,
+                    feedback=feedback_for_ai,
                 )
+                feedback_for_ai = ""
                 self.progress_updated.emit(min(60, 40 + iteration * 5))
 
                 if self._check_for_stop():
@@ -97,7 +100,7 @@ class DesktopAssistant(QObject):
                     ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
                 )
 
-                success_commands = [
+                recognized_commands = [
                     "kattints",
                     "gepelj",
                     "indits_programot",
@@ -106,9 +109,8 @@ class DesktopAssistant(QObject):
                     "kerj_jobb_minosegu_kepet",
                 ]
 
-                if command in success_commands:
-                    self.failure_counter = 0
-                else:
+                if command not in recognized_commands:
+                    command_label = command if command else "ismeretlen parancs"
                     self.failure_counter += 1
                     self.log_message.emit(
                         f"Értelmezhetetlen vagy hibás parancs: {command}. "
@@ -116,6 +118,10 @@ class DesktopAssistant(QObject):
                     )
                     self.status_updated.emit(
                         f"Hiba észlelve, újrapróbálkozás... ({self.failure_counter})"
+                    )
+                    feedback_for_ai = (
+                        f"Az előző parancsod ('{command_label}') sikertelen volt. "
+                        "Hiba: Ismeretlen parancs. Próbálj egy másik megoldást, például egy vizuális keresést!"
                     )
                     detail_level = "low"
                     if command != "valaszolj_a_felhasznalonak":
@@ -141,9 +147,29 @@ class DesktopAssistant(QObject):
                 if command and isinstance(arguments, dict):
                     self.status_updated.emit("Parancs végrehajtása...")
                     self.log_message.emit(f"Parancs: {command} {arguments}")
-                    self._handle_ai_action({"command": command, "arguments": arguments})
+                    execution_result = self._handle_ai_action(
+                        {"command": command, "arguments": arguments}
+                    )
                     self.progress_updated.emit(min(90, 70 + iteration * 5))
                     detail_level = "low"
+                    if execution_result.get("success"):
+                        self.failure_counter = 0
+                        feedback_for_ai = ""
+                    else:
+                        command_label = command if command else "ismeretlen parancs"
+                        self.failure_counter += 1
+                        error_message = execution_result.get(
+                            "error", "Ismeretlen hiba."
+                        )
+                        self.log_message.emit(f"Parancs sikertelen: {error_message}")
+                        self.status_updated.emit(
+                            f"Hiba észlelve, újrapróbálkozás... ({self.failure_counter})"
+                        )
+                        feedback_for_ai = (
+                            f"Az előző parancsod ('{command_label}') sikertelen volt. "
+                            f"Hiba: {error_message}. Próbálj egy másik megoldást, például egy vizuális keresést!"
+                        )
+                        continue
 
                 if self._check_for_stop():
                     break
@@ -236,7 +262,7 @@ class DesktopAssistant(QObject):
         )
         return True
 
-    def _handle_ai_action(self, ai_action: dict) -> None:
+    def _handle_ai_action(self, ai_action: dict) -> dict:
         command = ai_action.get("command")
         arguments = ai_action.get("arguments", {}) or {}
 
@@ -244,14 +270,19 @@ class DesktopAssistant(QObject):
             plugin_name = self._extract_plugin_name(arguments)
             if not plugin_name:
                 self.log_message.emit("A plugin futtatásához plugin_nev megadása szükséges.")
-                return
+                return {
+                    "success": False,
+                    "error": "A plugin futtatásához plugin_nev megadása szükséges.",
+                }
 
             try:
                 self.plugin_handler.execute_plugin(plugin_name)
                 self.log_message.emit(f"Plugin futtatva: {plugin_name}")
             except Exception as exc:
-                self.log_message.emit(f"Plugin futtatása sikertelen ({plugin_name}): {exc}")
-            return
+                error_message = f"Plugin futtatása sikertelen ({plugin_name}): {exc}"
+                self.log_message.emit(error_message)
+                return {"success": False, "error": error_message}
+            return {"success": True}
 
         if command == "kattints":
             element_name = self._extract_element_name_from_arguments(arguments)
@@ -269,7 +300,7 @@ class DesktopAssistant(QObject):
                         element_name,
                         source="memória",
                     )
-                    return
+                    return {"success": True}
 
                 if coords:
                     self.memory_handler.save_element_location(element_name, coords)
@@ -281,9 +312,13 @@ class DesktopAssistant(QObject):
                 self.computer_interface.click_at(
                     coords["x"], coords["y"], element_name
                 )
-                return
+                return {"success": True}
 
-        self.computer_interface.execute_command(command, arguments)
+            error_message = "A kattintáshoz érvényes koordináták szükségesek."
+            self.log_message.emit(error_message)
+            return {"success": False, "error": error_message}
+
+        return self.computer_interface.execute_command(command, arguments)
 
     @staticmethod
     def _extract_plugin_name(arguments: dict) -> str | None:
