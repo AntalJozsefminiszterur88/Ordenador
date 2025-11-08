@@ -34,6 +34,14 @@ class AIHandler:
         következő lépésben próbáld meg vizuálisan megkeresni a program ikonját a képernyőn
         a 'kattints' paranccsal.
         """
+        self.system_prompt_calibration = """
+        Te egy precíz vizuális elem felismerő asszisztens vagy. A feladatod, hogy egyetlen,
+        specifikus elemet találj meg a képernyőn, és visszaadd a pontos koordinátáit és a nevét
+        JSON formátumban a 'kattints' parancs segítségével. A koordinátákat a kapott
+        (lekicsinyített) képhez viszonyítva add meg. KÖTELEZŐ megadnod a 'leiras' mezőt
+        a megtalált elem nevével.
+        Példa válasz: {"command": "kattints", "arguments": {"x": 50, "y": 1050, "leiras": "Start Menü"}}
+        """
 
     def get_ai_decision(
         self,
@@ -107,4 +115,46 @@ class AIHandler:
             return json.loads(decision_str)
         except Exception as e:
             print(f"Hiba az API hívás során: {e}")
+            return {"command": "api_hiba", "arguments": {"hiba_uzenet": str(e)}}
+
+    def get_calibration_coordinates(self, screen_info: dict, element_to_find: str) -> dict:
+        print(f"🔬 Elem keresése kalibrációhoz: {element_to_find}...")
+        image_data = screen_info.get("image_data", "") if isinstance(screen_info, dict) else ""
+        image_width = screen_info.get("width", 0) if isinstance(screen_info, dict) else 0
+        image_height = screen_info.get("height", 0) if isinstance(screen_info, dict) else 0
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": self.system_prompt_calibration},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Feladat: Keresd meg a '{element}' elemet a képernyőn. "
+                                    "A kép mérete {width}x{height} pixel."
+                                ).format(
+                                    element=element_to_find,
+                                    width=image_width,
+                                    height=image_height,
+                                ),
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_data}",
+                                    "detail": "high",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                response_format={"type": "json_object"},
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:  # pragma: no cover - defensive logging
+            print(f"Hiba a kalibrációs API hívás során: {e}")
             return {"command": "api_hiba", "arguments": {"hiba_uzenet": str(e)}}
