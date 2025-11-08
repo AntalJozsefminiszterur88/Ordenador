@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
+
+from pynput.keyboard import Key, Listener
 
 from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
@@ -25,6 +27,9 @@ class DesktopAssistant(QObject):
         self.computer_interface = ComputerInterface()
         self.memory_handler = MemoryHandler()
         self.plugin_handler = PluginHandler()
+        self._stop_requested = False
+        self._stop_notified = False
+        self._keyboard_listener: Listener | None = None
 
     @Slot(str)
     def start_task(self, user_input: str) -> None:
@@ -37,17 +42,29 @@ class DesktopAssistant(QObject):
             self.task_finished.emit()
             return
 
+        self._reset_stop_state()
+        self._start_keyboard_listener()
+
         self.progress_updated.emit(0)
         self.status_updated.emit("Feladat indítása...")
         self.log_message.emit(f"Felhasználói utasítás: {user_input}")
 
         try:
+            if self._check_for_stop():
+                return
+
             if self._try_handle_from_memory(user_input):
+                return
+
+            if self._check_for_stop():
                 return
 
             self.status_updated.emit("Képernyőállapot lekérése...")
             screen_state = self.computer_interface.get_screen_state()
             self.progress_updated.emit(25)
+
+            if self._check_for_stop():
+                return
 
             self.status_updated.emit("AI döntés előkészítése...")
             available_plugins = self.plugin_handler.get_available_plugins()
@@ -58,6 +75,9 @@ class DesktopAssistant(QObject):
             )
             self.progress_updated.emit(50)
 
+            if self._check_for_stop():
+                return
+
             if "command" in ai_action and "arguments" in ai_action:
                 self.status_updated.emit("Parancs végrehajtása...")
                 self.log_message.emit(
@@ -65,6 +85,8 @@ class DesktopAssistant(QObject):
                 )
                 self._handle_ai_action(ai_action)
                 self.progress_updated.emit(90)
+                if self._check_for_stop():
+                    return
             else:
                 self.log_message.emit("Az AI nem adott érvényes parancsot.")
 
@@ -72,9 +94,64 @@ class DesktopAssistant(QObject):
             self.log_message.emit(f"Hiba történt: {exc}")
             self.status_updated.emit("Hiba történt a feldolgozás során.")
         finally:
+            self._stop_keyboard_listener()
             self.progress_updated.emit(100)
-            self.status_updated.emit("Feladat befejezve.")
+            if self._stop_requested:
+                self.log_message.emit("Feladat megszakítva.")
+                self.status_updated.emit("Feladat megszakítva.")
+            else:
+                self.status_updated.emit("Feladat befejezve.")
             self.task_finished.emit()
+            self._stop_requested = False
+            self._stop_notified = False
+
+    def _start_keyboard_listener(self) -> None:
+        """Start the global keyboard listener to capture ESC presses."""
+
+        if self._keyboard_listener is None:
+            self._keyboard_listener = Listener(on_press=self._handle_key_press)
+            self._keyboard_listener.start()
+
+    def _stop_keyboard_listener(self) -> None:
+        """Ensure the keyboard listener is stopped and cleaned up."""
+
+        if self._keyboard_listener is not None:
+            self._keyboard_listener.stop()
+            self._keyboard_listener.join()
+            self._keyboard_listener = None
+
+    def _reset_stop_state(self) -> None:
+        """Reset stop flags before starting a new task."""
+
+        self._stop_requested = False
+        self._stop_notified = False
+
+    def _handle_key_press(self, key: Key) -> None:
+        """React to ESC key presses by queueing a stop request."""
+
+        if key == Key.esc:
+            print("ESC lenyomva, leállítás kérése...")
+            QMetaObject.invokeMethod(self, "request_stop", Qt.QueuedConnection)
+
+    @Slot()
+    def request_stop(self) -> None:
+        """Idempotent stop request that can be triggered from multiple sources."""
+
+        if not self._stop_requested:
+            self._stop_requested = True
+            self._stop_notified = False
+
+    def _check_for_stop(self) -> bool:
+        """Check whether a stop was requested and emit user feedback once."""
+
+        if not self._stop_requested:
+            return False
+
+        if not self._stop_notified:
+            self._stop_notified = True
+            self.status_updated.emit("Megszakítás folyamatban...")
+            self.log_message.emit("Feladat megszakítása kérése érkezett.")
+        return True
 
     def _try_handle_from_memory(self, user_input: str) -> bool:
         element_name = self._extract_element_name(user_input)
