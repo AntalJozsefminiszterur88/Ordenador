@@ -83,9 +83,10 @@ class DesktopAssistant(QObject):
                     break
 
                 self.status_updated.emit("Képernyőállapot lekérése...")
-                screen_state = self.computer_interface.get_screen_state(
+                screen_info = self.computer_interface.get_screen_state(
                     detail_level=detail_level
                 )
+                screen_state_data = screen_info.get("image_data", "")
                 self.progress_updated.emit(min(30, 10 + iteration * 5))
 
                 if self._check_for_stop():
@@ -95,7 +96,7 @@ class DesktopAssistant(QObject):
                 available_plugins = self.plugin_handler.get_available_plugins()
                 ai_action = self.ai_handler.get_ai_decision(
                     original_task,
-                    screen_state,
+                    screen_state_data,
                     available_plugins,
                     detail_level=detail_level,
                     feedback=feedback_for_ai,
@@ -206,6 +207,131 @@ class DesktopAssistant(QObject):
             self.task_finished.emit()
             self._stop_requested = False
             self._stop_notified = False
+
+    @Slot()
+    def start_calibration_task(self) -> None:
+        """Runs the automated calibration routine."""
+
+        self._reset_stop_state()
+        self._start_keyboard_listener()
+
+        self.progress_updated.emit(0)
+        self.status_updated.emit("Kalibráció indítása...")
+        self.log_message.emit("Automatikus kalibráció elindítva.")
+
+        error_occurred = False
+
+        try:
+            elements_to_calibrate = [
+                {"name": "Start Menü", "prompt": "a Windows Start Menü ikonja a tálcán"},
+                {
+                    "name": "Rendszertálca Óra",
+                    "prompt": "a rendszertálca területe, ahol az óra található",
+                },
+            ]
+
+            total_elements = len(elements_to_calibrate)
+
+            for index, element in enumerate(elements_to_calibrate, start=1):
+                if self._check_for_stop():
+                    break
+
+                self.status_updated.emit(f"Kalibráció: '{element['name']}' keresése...")
+                self.progress_updated.emit(int(((index - 1) / total_elements) * 100))
+
+                screen_info = self.computer_interface.get_screen_state(detail_level="high")
+                ai_action = self.ai_handler.get_calibration_coordinates(
+                    screen_info, element["prompt"]
+                )
+
+                command = (
+                    ai_action.get("command") if isinstance(ai_action, dict) else None
+                )
+                arguments = (
+                    ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
+                )
+
+                if command == "kattints":
+                    ai_coords = self._extract_coordinates(arguments)
+                    if ai_coords:
+                        real_coords = self._transform_coordinates(ai_coords, screen_info)
+                        if real_coords:
+                            self.memory_handler.save_element_location(
+                                element["name"], real_coords
+                            )
+                            self.log_message.emit(
+                                f"✅ Elem kalibrálva: '{element['name']}' -> "
+                                f"({real_coords['x']}, {real_coords['y']})"
+                            )
+                            self.computer_interface._display_click_indicator(
+                                real_coords["x"], real_coords["y"]
+                            )
+                        else:
+                            self.log_message.emit(
+                                f"❌ Nem sikerült a koordináták transzformálása a(z) "
+                                f"'{element['name']}' elemhez."
+                            )
+                    else:
+                        self.log_message.emit(
+                            f"❌ AI nem talált koordinátákat a(z) '{element['name']}' elemhez."
+                        )
+                else:
+                    self.log_message.emit(
+                        f"❌ Sikertelen kalibráció a(z) '{element['name']}' elemhez. AI válasza: {ai_action}"
+                    )
+
+                self.progress_updated.emit(int((index / total_elements) * 100))
+
+                if self._check_for_stop():
+                    break
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            error_occurred = True
+            self.log_message.emit(f"Kalibráció során hiba történt: {exc}")
+            self.status_updated.emit("Hiba történt a kalibráció során.")
+        finally:
+            self._stop_keyboard_listener()
+            self.progress_updated.emit(100)
+            if self._stop_requested:
+                self.log_message.emit("Kalibráció megszakítva.")
+                self.status_updated.emit("Kalibráció megszakítva.")
+            elif not error_occurred:
+                self.status_updated.emit("Kalibráció befejezve.")
+            self.task_finished.emit()
+            self._stop_requested = False
+            self._stop_notified = False
+
+    def _transform_coordinates(
+        self, ai_coords: dict[str, int], screen_info: dict
+    ) -> dict[str, int] | None:
+        """Convert AI-provided coordinates to real screen coordinates."""
+
+        if not isinstance(ai_coords, dict):
+            return None
+
+        ai_x = ai_coords.get("x")
+        ai_y = ai_coords.get("y")
+        image_width = screen_info.get("width")
+        image_height = screen_info.get("height")
+        original_width = screen_info.get("original_width")
+        original_height = screen_info.get("original_height")
+
+        if not all(
+            isinstance(value, (int, float)) and value > 0
+            for value in (ai_x, ai_y, image_width, image_height, original_width, original_height)
+        ):
+            return None
+
+        scale_x = original_width / image_width if image_width else 1
+        scale_y = original_height / image_height if image_height else 1
+
+        real_x = int(round(ai_x * scale_x))
+        real_y = int(round(ai_y * scale_y))
+
+        real_x = max(0, min(real_x, int(original_width) - 1))
+        real_y = max(0, min(real_y, int(original_height) - 1))
+
+        return {"x": real_x, "y": real_y}
 
     def _start_keyboard_listener(self) -> None:
         """Start the global keyboard listener to capture ESC presses."""

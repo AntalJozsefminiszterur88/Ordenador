@@ -34,11 +34,13 @@ class ComputerInterface:
         except (json.JSONDecodeError, OSError) as exc:
             print(f"Hiba a programs.json betöltése közben: {exc}")
 
-    def get_screen_state(self, detail_level: str = "low") -> str:
-        """Készítsen teljes képernyőképet és adja vissza Base64 formátumban."""
+    def get_screen_state(self, detail_level: str = "low") -> dict[str, int | str]:
+        """Készítsen teljes képernyőképet és adja vissza Base64 formátumban és metaadatokkal."""
 
         try:
             screenshot = pyautogui.screenshot()
+
+            original_width, original_height = screenshot.size
 
             if detail_level == "high":
                 max_size = (2048, 2048)
@@ -49,14 +51,30 @@ class ComputerInterface:
 
             screenshot.thumbnail(max_size, Image.Resampling.LANCZOS)
 
+            processed_width, processed_height = screenshot.size
+
             buffer = io.BytesIO()
             screenshot.save(buffer, format="JPEG", quality=quality)
             img_bytes = buffer.getvalue()
             encoded = base64.b64encode(img_bytes).decode("ascii")
-            return encoded
+            return {
+                "image_data": encoded,
+                "width": processed_width,
+                "height": processed_height,
+                "original_width": original_width,
+                "original_height": original_height,
+                "detail": detail_level,
+            }
         except Exception as exc:  # pragma: no cover - vizuális környezet hiánya esetén
             print(f"Nem sikerült képernyőképet készíteni: {exc}")
-            return ""
+            return {
+                "image_data": "",
+                "width": 0,
+                "height": 0,
+                "original_width": 0,
+                "original_height": 0,
+                "detail": detail_level,
+            }
 
     def click_at(
         self,
