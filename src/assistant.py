@@ -83,7 +83,7 @@ class DesktopAssistant(QObject):
                     break
 
                 self.status_updated.emit("Képernyőállapot lekérése...")
-                screen_state = self.computer_interface.get_screen_state(
+                screen_info = self.computer_interface.get_screen_state(
                     detail_level=detail_level
                 )
                 self.progress_updated.emit(min(30, 10 + iteration * 5))
@@ -95,7 +95,7 @@ class DesktopAssistant(QObject):
                 available_plugins = self.plugin_handler.get_available_plugins()
                 ai_action = self.ai_handler.get_ai_decision(
                     original_task,
-                    screen_state,
+                    screen_info,
                     available_plugins,
                     detail_level=detail_level,
                     feedback=feedback_for_ai,
@@ -157,6 +157,14 @@ class DesktopAssistant(QObject):
 
                 if command and isinstance(arguments, dict):
                     self.status_updated.emit("Parancs végrehajtása...")
+                    if command == "kattints":
+                        ai_coords = self._extract_coordinates(arguments)
+                        if ai_coords:
+                            real_coords = self._transform_coordinates(
+                                ai_coords,
+                                screen_info if isinstance(screen_info, dict) else {},
+                            )
+                            arguments.update(real_coords)
                     self.log_message.emit(f"Parancs: {command} {arguments}")
                     execution_result = self._handle_ai_action(
                         {"command": command, "arguments": arguments}
@@ -272,6 +280,40 @@ class DesktopAssistant(QObject):
             coords["x"], coords["y"], element_name, source="memória"
         )
         return True
+
+    def _transform_coordinates(
+        self, ai_coords: dict, image_dims: dict
+    ) -> dict:
+        """Scales coordinates from the downscaled image to the real screen size."""
+
+        real_width = self.computer_interface.screen_width
+        real_height = self.computer_interface.screen_height
+
+        img_width = image_dims.get("width") if isinstance(image_dims, dict) else None
+        img_height = image_dims.get("height") if isinstance(image_dims, dict) else None
+
+        ai_x = ai_coords.get("x") if isinstance(ai_coords, dict) else None
+        ai_y = ai_coords.get("y") if isinstance(ai_coords, dict) else None
+
+        if not all(
+            [
+                real_width,
+                real_height,
+                img_width,
+                img_height,
+                isinstance(ai_x, (int, float)),
+                isinstance(ai_y, (int, float)),
+            ]
+        ):
+            return ai_coords
+
+        scale_x = real_width / img_width
+        scale_y = real_height / img_height
+
+        real_x = int(float(ai_x) * scale_x)
+        real_y = int(float(ai_y) * scale_y)
+
+        return {"x": real_x, "y": real_y}
 
     def _handle_ai_action(self, ai_action: dict) -> dict:
         command = ai_action.get("command")
