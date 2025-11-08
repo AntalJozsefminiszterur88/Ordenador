@@ -11,6 +11,7 @@ from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
 from src.plugin_handler import PluginHandler
 from src.memory_handler import MemoryHandler
+from src.context_handler import ContextHandler
 from src.config import DEBUG_MODE
 
 
@@ -28,6 +29,7 @@ class DesktopAssistant(QObject):
         self.computer_interface = ComputerInterface()
         self.memory_handler = MemoryHandler()
         self.plugin_handler = PluginHandler()
+        self.context_handler = ContextHandler()
         self._stop_requested = False
         self._stop_notified = False
         self._keyboard_listener: Listener | None = None
@@ -59,12 +61,11 @@ class DesktopAssistant(QObject):
             if self._try_handle_from_memory(user_input):
                 return
 
-            original_task = user_input
             iteration = 0
             detail_level = "low"
 
+            self.context_handler.start_new_task(user_input)
             self.failure_counter = 0
-            feedback_for_ai = ""
 
             while not self._stop_requested and self.failure_counter < self.max_failures:
                 iteration += 1
@@ -73,10 +74,8 @@ class DesktopAssistant(QObject):
                     print("\n" + "=" * 20 + f" CIKLUS #{iteration} " + "=" * 20)
                     print(f"HIBA SZÁMLÁLÓ: {self.failure_counter}/{self.max_failures}")
                     print(f"KÉP MINŐSÉG A KÖR ELEJÉN: {detail_level}")
-                    print(
-                        "VISSZAJELZÉS AZ AI-NAK: '"
-                        f"{feedback_for_ai if feedback_for_ai else 'Nincs'}'"
-                    )
+                    print("AKTUÁLIS ELŐZMÉNYEK:")
+                    print(self.context_handler.get_formatted_history())
                     print("=" * 55)
 
                 if self._check_for_stop():
@@ -93,14 +92,14 @@ class DesktopAssistant(QObject):
 
                 self.status_updated.emit("AI döntés előkészítése...")
                 available_plugins = self.plugin_handler.get_available_plugins()
+                history_for_ai = self.context_handler.get_formatted_history()
                 ai_action = self.ai_handler.get_ai_decision(
-                    original_task,
+                    self.context_handler.original_task,
                     screen_info,
                     available_plugins,
                     detail_level=detail_level,
-                    feedback=feedback_for_ai,
+                    history=history_for_ai,
                 )
-                feedback_for_ai = ""
                 self.progress_updated.emit(min(60, 40 + iteration * 5))
 
                 if self._check_for_stop():
@@ -130,9 +129,11 @@ class DesktopAssistant(QObject):
                     self.status_updated.emit(
                         f"Hiba észlelve, újrapróbálkozás... ({self.failure_counter})"
                     )
-                    feedback_for_ai = (
-                        f"Az előző parancsod ('{command_label}') sikertelen volt. "
-                        "Hiba: Ismeretlen parancs. Próbálj egy másik megoldást, például egy vizuális keresést!"
+                    self.context_handler.add_system_feedback(
+                        (
+                            f"Az előző parancsod ('{command_label}') sikertelen volt. "
+                            "Hiba: Ismeretlen parancs. Próbálj egy másik megoldást, például egy vizuális keresést!"
+                        )
                     )
                     detail_level = "low"
                     if command != "valaszolj_a_felhasznalonak":
@@ -144,6 +145,7 @@ class DesktopAssistant(QObject):
                     )
                     self.status_updated.emit("Képminőség növelése...")
                     detail_level = "high"
+                    self.context_handler.add_assistant_action(ai_action)
                     continue
 
                 if command == "feladat_befejezve":
@@ -153,6 +155,7 @@ class DesktopAssistant(QObject):
                             self.status_updated.emit(message.strip())
                             self.log_message.emit(f"AI üzenet: {message.strip()}")
                     detail_level = "low"
+                    self.context_handler.add_assistant_action(ai_action)
                     break
 
                 if command and isinstance(arguments, dict):
@@ -173,7 +176,7 @@ class DesktopAssistant(QObject):
                     detail_level = "low"
                     if execution_result.get("success"):
                         self.failure_counter = 0
-                        feedback_for_ai = ""
+                        self.context_handler.add_assistant_action(ai_action)
                     else:
                         command_label = command if command else "ismeretlen parancs"
                         self.failure_counter += 1
@@ -184,9 +187,11 @@ class DesktopAssistant(QObject):
                         self.status_updated.emit(
                             f"Hiba észlelve, újrapróbálkozás... ({self.failure_counter})"
                         )
-                        feedback_for_ai = (
-                            f"Az előző parancsod ('{command_label}') sikertelen volt. "
-                            f"Hiba: {error_message}. Próbálj egy másik megoldást, például egy vizuális keresést!"
+                        self.context_handler.add_system_feedback(
+                            (
+                                f"Az előző parancsod ('{command_label}') sikertelen volt. "
+                                f"Hiba: {error_message}. Próbálj egy másik megoldást, például egy vizuális keresést!"
+                            )
                         )
                         continue
 
