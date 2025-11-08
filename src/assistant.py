@@ -30,6 +30,8 @@ class DesktopAssistant(QObject):
         self._stop_requested = False
         self._stop_notified = False
         self._keyboard_listener: Listener | None = None
+        self.failure_counter = 0
+        self.max_failures = 3
 
     @Slot(str)
     def start_task(self, user_input: str) -> None:
@@ -60,7 +62,9 @@ class DesktopAssistant(QObject):
             iteration = 0
             detail_level = "low"
 
-            while not self._stop_requested:
+            self.failure_counter = 0
+
+            while not self._stop_requested and self.failure_counter < self.max_failures:
                 iteration += 1
 
                 if self._check_for_stop():
@@ -89,7 +93,33 @@ class DesktopAssistant(QObject):
                     break
 
                 command = ai_action.get("command") if isinstance(ai_action, dict) else None
-                arguments = ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
+                arguments = (
+                    ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
+                )
+
+                success_commands = [
+                    "kattints",
+                    "gepelj",
+                    "indits_programot",
+                    "futtass_plugint",
+                    "feladat_befejezve",
+                    "kerj_jobb_minosegu_kepet",
+                ]
+
+                if command in success_commands:
+                    self.failure_counter = 0
+                else:
+                    self.failure_counter += 1
+                    self.log_message.emit(
+                        f"Értelmezhetetlen vagy hibás parancs: {command}. "
+                        f"Próbálkozás: {self.failure_counter}/{self.max_failures}"
+                    )
+                    self.status_updated.emit(
+                        f"Hiba észlelve, újrapróbálkozás... ({self.failure_counter})"
+                    )
+                    detail_level = "low"
+                    if command != "valaszolj_a_felhasznalonak":
+                        continue
 
                 if command == "kerj_jobb_minosegu_kepet":
                     self.log_message.emit(
@@ -114,13 +144,15 @@ class DesktopAssistant(QObject):
                     self._handle_ai_action({"command": command, "arguments": arguments})
                     self.progress_updated.emit(min(90, 70 + iteration * 5))
                     detail_level = "low"
-                else:
-                    self.log_message.emit("Az AI nem adott érvényes parancsot.")
-                    self.status_updated.emit("Érvénytelen AI parancs érkezett.")
-                    detail_level = "low"
 
                 if self._check_for_stop():
                     break
+
+            if self.failure_counter >= self.max_failures:
+                self.log_message.emit(
+                    f"A feladat leállt {self.max_failures} sikertelen próbálkozás után."
+                )
+                self.status_updated.emit("A feladatot nem sikerült végrehajtani.")
 
         except Exception as exc:  # pragma: no cover - defensive logging
             self.log_message.emit(f"Hiba történt: {exc}")
@@ -132,7 +164,8 @@ class DesktopAssistant(QObject):
                 self.log_message.emit("Feladat megszakítva.")
                 self.status_updated.emit("Feladat megszakítva.")
             else:
-                self.status_updated.emit("Feladat befejezve.")
+                if self.failure_counter < self.max_failures:
+                    self.status_updated.emit("Feladat befejezve.")
             self.task_finished.emit()
             self._stop_requested = False
             self._stop_notified = False
