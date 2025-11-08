@@ -71,4 +71,4 @@ class AIHandler:
             return json.loads(decision_str)
         except Exception as e:
             print(f"Hiba az API hívás során: {e}")
-            return {"command": "valaszolj_a_felhasznalonak", "arguments": {"uzenet": "Hiba történt."}}
+            return {"command": "api_hiba", "arguments": {"hiba_uzenet": str(e)}}
