@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
+from PySide6.QtWidgets import QApplication
 
 from pynput.keyboard import Key, Listener
 
@@ -241,7 +242,13 @@ class DesktopAssistant(QObject):
 
             grid_widget = CalibrationGrid()
             grid_widget.showFullScreen()
-            time.sleep(0.5)
+
+            # ÚJ, MEGBÍZHATÓ MEGOLDÁS:
+            # Arra kényszerítjük a Qt eseményhurkot, hogy azonnal dolgozza fel
+            # az összes függőben lévő eseményt, beleértve a widget kirajzolását is.
+            # Ez a parancs addig blokkolja a futást, amíg a rács ténylegesen láthatóvá nem válik.
+            QApplication.processEvents()
+            time.sleep(0.1)  # Egy nagyon rövid extra várakozás a biztonság kedvéért, ha a rendszer lassú.
 
             if self._check_for_stop():
                 return
