@@ -299,29 +299,34 @@ class DesktopAssistant(QObject):
             element_name = self._extract_element_name_from_arguments(arguments)
             coords = self._extract_coordinates(arguments)
 
+            click_source: str | None = None
+
             if element_name:
                 stored_coords = self.memory_handler.get_element_location(element_name)
-                if stored_coords:
-                    self.log_message.emit(
-                        f"Memóriából kattintás: {element_name} -> ({stored_coords['x']}, {stored_coords['y']})"
-                    )
-                    self.computer_interface.click_at(
-                        stored_coords["x"],
-                        stored_coords["y"],
-                        element_name,
-                        source="memória",
-                    )
-                    return {"success": True}
 
                 if coords:
                     self.memory_handler.save_element_location(element_name, coords)
+                    message_prefix = "Pozíció frissítve" if stored_coords else "Új pozíció elmentve"
                     self.log_message.emit(
-                        f"Új pozíció elmentve: {element_name} -> ({coords['x']}, {coords['y']})"
+                        f"{message_prefix}: {element_name} -> ({coords['x']}, {coords['y']})"
+                    )
+                elif stored_coords:
+                    coords = stored_coords
+                    click_source = "memória"
+                    self.log_message.emit(
+                        f"Memóriából kattintás: {element_name} -> ({coords['x']}, {coords['y']})"
+                    )
+                else:
+                    self.log_message.emit(
+                        f"Leírás alapján az elem azonosítva ('{element_name}'), de koordinátát nem kaptunk."
                     )
 
             if coords:
                 self.computer_interface.click_at(
-                    coords["x"], coords["y"], element_name
+                    coords["x"],
+                    coords["y"],
+                    element_name,
+                    source=click_source,
                 )
                 return {"success": True}
 
