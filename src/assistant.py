@@ -56,39 +56,56 @@ class DesktopAssistant(QObject):
             if self._try_handle_from_memory(user_input):
                 return
 
-            if self._check_for_stop():
-                return
+            original_task = user_input
+            iteration = 0
 
-            self.status_updated.emit("Képernyőállapot lekérése...")
-            screen_state = self.computer_interface.get_screen_state()
-            self.progress_updated.emit(25)
+            while not self._stop_requested:
+                iteration += 1
 
-            if self._check_for_stop():
-                return
-
-            self.status_updated.emit("AI döntés előkészítése...")
-            available_plugins = self.plugin_handler.get_available_plugins()
-            ai_action = self.ai_handler.get_ai_decision(
-                user_input,
-                screen_state,
-                available_plugins,
-            )
-            self.progress_updated.emit(50)
-
-            if self._check_for_stop():
-                return
-
-            if "command" in ai_action and "arguments" in ai_action:
-                self.status_updated.emit("Parancs végrehajtása...")
-                self.log_message.emit(
-                    f"Parancs: {ai_action['command']} {ai_action['arguments']}"
-                )
-                self._handle_ai_action(ai_action)
-                self.progress_updated.emit(90)
                 if self._check_for_stop():
-                    return
-            else:
-                self.log_message.emit("Az AI nem adott érvényes parancsot.")
+                    break
+
+                self.status_updated.emit("Képernyőállapot lekérése...")
+                screen_state = self.computer_interface.get_screen_state()
+                self.progress_updated.emit(min(30, 10 + iteration * 5))
+
+                if self._check_for_stop():
+                    break
+
+                self.status_updated.emit("AI döntés előkészítése...")
+                available_plugins = self.plugin_handler.get_available_plugins()
+                ai_action = self.ai_handler.get_ai_decision(
+                    original_task,
+                    screen_state,
+                    available_plugins,
+                )
+                self.progress_updated.emit(min(60, 40 + iteration * 5))
+
+                if self._check_for_stop():
+                    break
+
+                command = ai_action.get("command") if isinstance(ai_action, dict) else None
+                arguments = ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
+
+                if command == "feladat_befejezve":
+                    if isinstance(arguments, dict):
+                        message = arguments.get("uzenet")
+                        if isinstance(message, str) and message.strip():
+                            self.status_updated.emit(message.strip())
+                            self.log_message.emit(f"AI üzenet: {message.strip()}")
+                    break
+
+                if command and isinstance(arguments, dict):
+                    self.status_updated.emit("Parancs végrehajtása...")
+                    self.log_message.emit(f"Parancs: {command} {arguments}")
+                    self._handle_ai_action({"command": command, "arguments": arguments})
+                    self.progress_updated.emit(min(90, 70 + iteration * 5))
+                else:
+                    self.log_message.emit("Az AI nem adott érvényes parancsot.")
+                    self.status_updated.emit("Érvénytelen AI parancs érkezett.")
+
+                if self._check_for_stop():
+                    break
 
         except Exception as exc:  # pragma: no cover - defensive logging
             self.log_message.emit(f"Hiba történt: {exc}")

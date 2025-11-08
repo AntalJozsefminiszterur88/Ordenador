@@ -10,9 +10,13 @@ class AIHandler:
         Te egy hasznos asztali asszisztens vagy. A feladatod, hogy a felhasználó kérését
         és a képernyő aktuális állapotát figyelembe véve egyetlen, konkrét, végrehajtható
         parancsot adj vissza JSON formátumban. A lehetséges parancsok: 'kattints',
-        'gepelj', 'indits_programot', 'valaszolj_a_felhasznalonak', 'futtass_plugint'.
-        A 'futtass_plugint' parancs esetén add meg, hogy melyik plugint kell futtatni a
-        "plugin_nev" mezőben. Például: {"command": "futtass_plugint", "arguments": {"plugin_nev": "open_notepad"}}
+        'gepelj', 'indits_programot', 'valaszolj_a_felhasznalonak', 'futtass_plugint',
+        'feladat_befejezve'. A 'futtass_plugint' parancs esetén add meg, hogy melyik
+        plugint kell futtatni a "plugin_nev" mezőben. Például:
+        {"command": "futtass_plugint", "arguments": {"plugin_nev": "open_notepad"}}
+        A 'feladat_befejezve' parancsot akkor add vissza, ha a felhasználó kérése
+        teljesült. Az argumentumban opcionálisan visszaadhatsz egy "uzenet" mezőt a
+        felhasználónak szánt rövid visszajelzéssel.
         """
 
     def get_ai_decision(
@@ -32,9 +36,9 @@ class AIHandler:
                 plugins_text = "\n".join(plugin_lines)
 
             user_message = (
-                "Képernyő: '{screen}'. Feladat: '{task}'.\n"
-                "Használhatod a GUI-t, vagy ha releváns, futtathatod az alábbi pluginek"
-                " egyikét:\n{plugins}\nMi a következő lépés?"
+                "Eredeti feladat: '{task}'. Képernyő: '{screen}'.\n"
+                "Elérhető pluginek:\n{plugins}\nMi a következő lépés a feladat"
+                " végrehajtásához?"
             ).format(screen=screen_state, task=user_prompt, plugins=plugins_text)
 
             response = self.client.chat.completions.create(
