@@ -19,17 +19,23 @@ class ComputerInterface:
     def __init__(self) -> None:
         self._active_indicators: list[ClickIndicator] = []
 
-    def get_screen_state(self) -> str:
+    def get_screen_state(self, detail_level: str = "low") -> str:
         """Készítsen teljes képernyőképet és adja vissza Base64 formátumban."""
 
         try:
             screenshot = pyautogui.screenshot()
 
-            max_size = (1024, 1024)
+            if detail_level == "high":
+                max_size = (2048, 2048)
+                quality = 95
+            else:
+                max_size = (1024, 1024)
+                quality = 80
+
             screenshot.thumbnail(max_size, Image.Resampling.LANCZOS)
 
             buffer = io.BytesIO()
-            screenshot.save(buffer, format="JPEG", quality=80)
+            screenshot.save(buffer, format="JPEG", quality=quality)
             img_bytes = buffer.getvalue()
             encoded = base64.b64encode(img_bytes).decode("ascii")
             return encoded
