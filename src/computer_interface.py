@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 import pyautogui
 from PIL import Image
@@ -18,6 +20,19 @@ from src.gui.widgets import ClickIndicator
 class ComputerInterface:
     def __init__(self) -> None:
         self._active_indicators: list[ClickIndicator] = []
+        self.program_paths: dict[str, str | Sequence[str]] = {}
+        self._load_program_paths()
+
+    def _load_program_paths(self) -> None:
+        """Loads program shortcuts from the root programs.json file."""
+
+        try:
+            config_path = Path(__file__).resolve().parent.parent / "programs.json"
+            if config_path.exists():
+                with config_path.open("r", encoding="utf-8") as file:
+                    self.program_paths = json.load(file)
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"Hiba a programs.json betöltése közben: {exc}")
 
     def get_screen_state(self, detail_level: str = "low") -> str:
         """Készítsen teljes képernyőképet és adja vissza Base64 formátumban."""
@@ -91,7 +106,7 @@ class ComputerInterface:
             return {"success": True}
 
         if command == "indits_programot":
-            program_nev = (
+            program_alias = (
                 args.get("program_nev")
                 or args.get("program")
                 or args.get("path")
@@ -99,25 +114,35 @@ class ComputerInterface:
                 or args.get("exe")
             )
 
-            if not program_nev:
+            if not program_alias:
                 return {"success": False, "error": "A program_nev megadása kötelező."}
 
-            if isinstance(program_nev, Sequence) and not isinstance(program_nev, str):
-                command_sequence = list(program_nev)
+            command_sequence: list[str]
+
+            if isinstance(program_alias, Sequence) and not isinstance(program_alias, str):
+                command_sequence = [str(part) for part in program_alias]
             else:
-                command_sequence = [str(program_nev)]
+                executable_path: str | Sequence[str] | None = self.program_paths.get(program_alias)
+
+                if not executable_path:
+                    executable_path = program_alias
+
+                if isinstance(executable_path, Sequence) and not isinstance(executable_path, str):
+                    command_sequence = [str(part) for part in executable_path]
+                else:
+                    command_sequence = [str(executable_path)]
 
             extra_args = args.get("args")
             if isinstance(extra_args, str):
-                command_sequence.append(extra_args)
+                command_sequence = [*command_sequence, extra_args]
             elif isinstance(extra_args, Sequence):
-                command_sequence.extend(str(arg) for arg in extra_args)
+                command_sequence = [*command_sequence, *(str(arg) for arg in extra_args)]
 
             try:
                 subprocess.Popen(command_sequence)
                 return {"success": True}
             except FileNotFoundError:
-                program_display = command_sequence[0] if command_sequence else program_nev
+                program_display = command_sequence[0] if command_sequence else str(program_alias)
                 return {
                     "success": False,
                     "error": f"A(z) '{program_display}' program nem található.",
