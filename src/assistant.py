@@ -58,6 +58,7 @@ class DesktopAssistant(QObject):
 
             original_task = user_input
             iteration = 0
+            detail_level = "low"
 
             while not self._stop_requested:
                 iteration += 1
@@ -66,7 +67,9 @@ class DesktopAssistant(QObject):
                     break
 
                 self.status_updated.emit("Képernyőállapot lekérése...")
-                screen_state = self.computer_interface.get_screen_state()
+                screen_state = self.computer_interface.get_screen_state(
+                    detail_level=detail_level
+                )
                 self.progress_updated.emit(min(30, 10 + iteration * 5))
 
                 if self._check_for_stop():
@@ -78,6 +81,7 @@ class DesktopAssistant(QObject):
                     original_task,
                     screen_state,
                     available_plugins,
+                    detail_level=detail_level,
                 )
                 self.progress_updated.emit(min(60, 40 + iteration * 5))
 
@@ -87,12 +91,21 @@ class DesktopAssistant(QObject):
                 command = ai_action.get("command") if isinstance(ai_action, dict) else None
                 arguments = ai_action.get("arguments", {}) if isinstance(ai_action, dict) else {}
 
+                if command == "kerj_jobb_minosegu_kepet":
+                    self.log_message.emit(
+                        "AI jobb minőségű képet kért, újrapróbálkozás..."
+                    )
+                    self.status_updated.emit("Képminőség növelése...")
+                    detail_level = "high"
+                    continue
+
                 if command == "feladat_befejezve":
                     if isinstance(arguments, dict):
                         message = arguments.get("uzenet")
                         if isinstance(message, str) and message.strip():
                             self.status_updated.emit(message.strip())
                             self.log_message.emit(f"AI üzenet: {message.strip()}")
+                    detail_level = "low"
                     break
 
                 if command and isinstance(arguments, dict):
@@ -100,9 +113,11 @@ class DesktopAssistant(QObject):
                     self.log_message.emit(f"Parancs: {command} {arguments}")
                     self._handle_ai_action({"command": command, "arguments": arguments})
                     self.progress_updated.emit(min(90, 70 + iteration * 5))
+                    detail_level = "low"
                 else:
                     self.log_message.emit("Az AI nem adott érvényes parancsot.")
                     self.status_updated.emit("Érvénytelen AI parancs érkezett.")
+                    detail_level = "low"
 
                 if self._check_for_stop():
                     break

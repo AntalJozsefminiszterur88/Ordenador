@@ -11,12 +11,17 @@ class AIHandler:
         és a képernyő aktuális állapotát figyelembe véve egyetlen, konkrét, végrehajtható
         parancsot adj vissza JSON formátumban. A lehetséges parancsok: 'kattints',
         'gepelj', 'indits_programot', 'valaszolj_a_felhasznalonak', 'futtass_plugint',
-        'feladat_befejezve'. A 'futtass_plugint' parancs esetén add meg, hogy melyik
-        plugint kell futtatni a "plugin_nev" mezőben. Például:
+        'kerj_jobb_minosegu_kepet', 'feladat_befejezve'. A 'futtass_plugint' parancs
+        esetén add meg, hogy melyik plugint kell futtatni a "plugin_nev" mezőben.
+        Például:
         {"command": "futtass_plugint", "arguments": {"plugin_nev": "open_notepad"}}
         A 'feladat_befejezve' parancsot akkor add vissza, ha a felhasználó kérése
         teljesült. Az argumentumban opcionálisan visszaadhatsz egy "uzenet" mezőt a
-        felhasználónak szánt rövid visszajelzéssel.
+        felhasználónak szánt rövid visszajelzéssel. A 'kerj_jobb_minosegu_kepet'
+        parancsnál add meg a "leiras" mezőben, miért van szükség jobb képre.
+        Fontos: Ha a kapott kép minősége túl alacsony ahhoz, hogy egy kritikus részletet
+        (pl. egy gomb feliratát) elolvass, akkor ne tippelj! Használd a
+        'kerj_jobb_minosegu_kepet' parancsot, és kérj egy részletesebb képet.
         """
 
     def get_ai_decision(
@@ -24,6 +29,7 @@ class AIHandler:
         user_prompt: str,
         screen_state: str,
         available_plugins: list[dict[str, str]] | None = None,
+        detail_level: str = "low",
     ) -> dict:
         print("🧠 AI gondolkodik...")
         try:
@@ -53,6 +59,7 @@ class AIHandler:
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{screen_state}",
+                                    "detail": detail_level,
                                 },
                             },
                         ],
