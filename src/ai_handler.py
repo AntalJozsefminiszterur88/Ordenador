@@ -35,17 +35,28 @@ class AIHandler:
                 ]
                 plugins_text = "\n".join(plugin_lines)
 
-            user_message = (
-                "Eredeti feladat: '{task}'. Képernyő: '{screen}'.\n"
-                "Elérhető pluginek:\n{plugins}\nMi a következő lépés a feladat"
-                " végrehajtásához?"
-            ).format(screen=screen_state, task=user_prompt, plugins=plugins_text)
-
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_message},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Feladat: '{user_prompt}'. A pluginek: {plugins_text}. "
+                                    "Mi a következő lépés?"
+                                ),
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{screen_state}",
+                                },
+                            },
+                        ],
+                    },
                 ],
                 response_format={"type": "json_object"}
             )
