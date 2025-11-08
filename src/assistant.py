@@ -7,6 +7,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
+from src.plugin_handler import PluginHandler
 from src.memory_handler import MemoryHandler
 
 
@@ -23,6 +24,7 @@ class DesktopAssistant(QObject):
         self.ai_handler = AIHandler()
         self.computer_interface = ComputerInterface()
         self.memory_handler = MemoryHandler()
+        self.plugin_handler = PluginHandler()
 
     @Slot(str)
     def start_task(self, user_input: str) -> None:
@@ -48,7 +50,12 @@ class DesktopAssistant(QObject):
             self.progress_updated.emit(25)
 
             self.status_updated.emit("AI döntés előkészítése...")
-            ai_action = self.ai_handler.get_ai_decision(user_input, screen_state)
+            available_plugins = self.plugin_handler.get_available_plugins()
+            ai_action = self.ai_handler.get_ai_decision(
+                user_input,
+                screen_state,
+                available_plugins,
+            )
             self.progress_updated.emit(50)
 
             if "command" in ai_action and "arguments" in ai_action:
@@ -91,6 +98,19 @@ class DesktopAssistant(QObject):
         command = ai_action.get("command")
         arguments = ai_action.get("arguments", {}) or {}
 
+        if command == "futtass_plugint":
+            plugin_name = self._extract_plugin_name(arguments)
+            if not plugin_name:
+                self.log_message.emit("A plugin futtatásához plugin_nev megadása szükséges.")
+                return
+
+            try:
+                self.plugin_handler.execute_plugin(plugin_name)
+                self.log_message.emit(f"Plugin futtatva: {plugin_name}")
+            except Exception as exc:
+                self.log_message.emit(f"Plugin futtatása sikertelen ({plugin_name}): {exc}")
+            return
+
         if command == "kattints":
             element_name = self._extract_element_name_from_arguments(arguments)
             coords = self._extract_coordinates(arguments)
@@ -122,6 +142,14 @@ class DesktopAssistant(QObject):
                 return
 
         self.computer_interface.execute_command(command, arguments)
+
+    @staticmethod
+    def _extract_plugin_name(arguments: dict) -> str | None:
+        for key in ("plugin_nev", "plugin", "name"):
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     @staticmethod
     def _extract_element_name(text: str) -> str | None:

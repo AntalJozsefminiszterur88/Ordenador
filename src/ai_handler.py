@@ -9,19 +9,39 @@ class AIHandler:
         self.system_prompt = """
         Te egy hasznos asztali asszisztens vagy. A feladatod, hogy a felhasználó kérését
         és a képernyő aktuális állapotát figyelembe véve egyetlen, konkrét, végrehajtható
-        parancsot adj vissza JSON formátumban. A lehetséges parancsok: 'kattints', 
-        'gepelj', 'indits_programot', 'valaszolj_a_felhasznalonak'.
-        Például: {"command": "indits_programot", "arguments": {"program_nev": "böngésző"}}
+        parancsot adj vissza JSON formátumban. A lehetséges parancsok: 'kattints',
+        'gepelj', 'indits_programot', 'valaszolj_a_felhasznalonak', 'futtass_plugint'.
+        A 'futtass_plugint' parancs esetén add meg, hogy melyik plugint kell futtatni a
+        "plugin_nev" mezőben. Például: {"command": "futtass_plugint", "arguments": {"plugin_nev": "open_notepad"}}
         """
 
-    def get_ai_decision(self, user_prompt: str, screen_state: str) -> dict:
+    def get_ai_decision(
+        self,
+        user_prompt: str,
+        screen_state: str,
+        available_plugins: list[dict[str, str]] | None = None,
+    ) -> dict:
         print("🧠 AI gondolkodik...")
         try:
+            plugins_text = "Nincsenek elérhető pluginek."
+            if available_plugins:
+                plugin_lines = [
+                    f"- {plugin['name']}: {plugin['description']}"
+                    for plugin in available_plugins
+                ]
+                plugins_text = "\n".join(plugin_lines)
+
+            user_message = (
+                "Képernyő: '{screen}'. Feladat: '{task}'.\n"
+                "Használhatod a GUI-t, vagy ha releváns, futtathatod az alábbi pluginek"
+                " egyikét:\n{plugins}\nMi a következő lépés?"
+            ).format(screen=screen_state, task=user_prompt, plugins=plugins_text)
+
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": f"Képernyő: '{screen_state}'. Feladat: '{user_prompt}'. Mi a következő lépés?"}
+                    {"role": "user", "content": user_message},
                 ],
                 response_format={"type": "json_object"}
             )
