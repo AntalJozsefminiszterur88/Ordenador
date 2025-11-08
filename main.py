@@ -1,12 +1,20 @@
-# main.py
-# Ez a projekt fő belépési pontja.
-# Egyetlen feladata, hogy elindítsa az AI asszisztenst.
+"""Application entry point for the Ordenador assistant GUI."""
 
-from src.assistant import DesktopAssistant
+import sys
+
+from PySide6.QtWidgets import QApplication
+
+from src.gui import MainWindow
+
+
+def main() -> None:
+    """Start the Qt application and show the main window."""
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
 
 if __name__ == "__main__":
-    # Létrehozzuk az asszisztens egy példányát
-    asszisztens = DesktopAssistant()
-    
-    # Elindítjuk az asszisztens fő ciklusát
-    asszisztens.run()
+    main()
