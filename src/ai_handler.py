@@ -15,6 +15,9 @@ class AIHandler:
         esetén add meg, hogy melyik plugint kell futtatni a "plugin_nev" mezőben.
         Például:
         {"command": "futtass_plugint", "arguments": {"plugin_nev": "open_notepad"}}
+        A 'kattints' parancs formátuma: '- 'kattints': {'x': <szám>, 'y': <szám>,
+        'leiras': '<MIT LÁTSZ OTT?>'}. Ha vizuálisan azonosítasz egy elemet a
+        képernyőn, KÖTELEZŐ megadnod a 'leiras' mezőt is!
         A 'feladat_befejezve' parancsot akkor add vissza, ha a felhasználó kérése
         teljesült. Az argumentumban opcionálisan visszaadhatsz egy "uzenet" mezőt a
         felhasználónak szánt rövid visszajelzéssel. A 'kerj_jobb_minosegu_kepet'
