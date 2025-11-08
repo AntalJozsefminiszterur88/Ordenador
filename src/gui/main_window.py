@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QInputDialog,
     QLineEdit,
     QMainWindow,
     QPushButton,
@@ -16,7 +17,9 @@ from PySide6.QtWidgets import (
 )
 
 from src.assistant import DesktopAssistant
+from src.gui.click_interceptor import ClickInterceptor
 from src.gui.overlay_window import OverlayWindow
+from src.memory_handler import MemoryHandler
 
 
 class MainWindow(QMainWindow):
@@ -30,6 +33,8 @@ class MainWindow(QMainWindow):
 
         self.assistant: DesktopAssistant | None = None
         self.assistant_thread: QThread | None = None
+        self.click_interceptor: ClickInterceptor | None = None
+        self.memory_handler = MemoryHandler()
 
         self._setup_ui()
         self._setup_tray_icon()
@@ -50,6 +55,10 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton("Indítás", self)
         self.start_button.clicked.connect(self._on_start_clicked)
         layout.addWidget(self.start_button)
+
+        self.training_button = QPushButton("Elem tanítása", self)
+        self.training_button.clicked.connect(self._on_train_element_clicked)
+        layout.addWidget(self.training_button)
 
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
@@ -145,6 +154,56 @@ class MainWindow(QMainWindow):
         """Handle assistant completion by restoring the main window."""
 
         self.overlay.hide()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.tray_icon.hide()
+
+    def _on_train_element_clicked(self) -> None:
+        """Start the interactive element training flow."""
+
+        if self.click_interceptor is not None:
+            return
+
+        self.hide()
+        self.click_interceptor = ClickInterceptor(self)
+        self.click_interceptor.clicked.connect(self._on_element_click_captured)
+        self.click_interceptor.closed.connect(self._on_click_interceptor_closed)
+        self.click_interceptor.showFullScreen()
+        self.click_interceptor.activateWindow()
+
+    def _on_element_click_captured(self, x: int, y: int) -> None:
+        """Ask for the element name and persist the captured coordinates."""
+
+        name, ok = QInputDialog.getText(self, "Elem tanítása", "Add meg az elem nevét:")
+        if ok:
+            cleaned_name = name.strip()
+            if cleaned_name:
+                self.memory_handler.save_element_location(cleaned_name, {"x": x, "y": y})
+        self._finalize_training()
+
+    def _on_click_interceptor_closed(self) -> None:
+        """Ensure the main window is restored when the interceptor closes."""
+
+        self._finalize_training()
+
+    def _finalize_training(self) -> None:
+        """Clean up the click interceptor and restore the window."""
+
+        if self.click_interceptor is not None:
+            try:
+                self.click_interceptor.clicked.disconnect(self._on_element_click_captured)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                self.click_interceptor.closed.disconnect(self._on_click_interceptor_closed)
+            except (TypeError, RuntimeError):
+                pass
+            if self.click_interceptor.isVisible():
+                self.click_interceptor.hide()
+            self.click_interceptor.deleteLater()
+            self.click_interceptor = None
+
         self.showNormal()
         self.raise_()
         self.activateWindow()
