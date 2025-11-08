@@ -26,6 +26,7 @@ class MainWindow(QMainWindow):
     """Simple main window with a tray icon toggle."""
 
     start_task_requested = Signal(str)
+    start_calibration_requested = Signal()
     stop_task_requested = Signal()
 
     def __init__(self) -> None:
@@ -60,6 +61,10 @@ class MainWindow(QMainWindow):
         self.training_button = QPushButton("Elem tanítása", self)
         self.training_button.clicked.connect(self._on_train_element_clicked)
         layout.addWidget(self.training_button)
+
+        self.calibration_button = QPushButton("Kalibráció", self)
+        self.calibration_button.clicked.connect(self._on_start_calibration)
+        layout.addWidget(self.calibration_button)
 
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
@@ -96,6 +101,23 @@ class MainWindow(QMainWindow):
         self.hide()
 
         self._start_assistant(command)
+
+    def _on_start_calibration(self) -> None:
+        """Launch the automated calibration flow."""
+
+        if self.assistant_thread is not None and self.assistant_thread.isRunning():
+            return
+
+        if not self.tray_icon.icon().isNull():
+            self.tray_icon.show()
+        else:
+            self.tray_icon.setIcon(self._default_icon())
+            self.tray_icon.show()
+
+        self._prepare_overlay()
+        self.hide()
+
+        self._start_calibration()
 
     def _on_tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Restore the main window when the tray icon is clicked."""
@@ -134,14 +156,33 @@ class MainWindow(QMainWindow):
     def _start_assistant(self, command: str) -> None:
         """Create the assistant worker and start it on a background thread."""
 
-        if self.assistant_thread is not None and self.assistant_thread.isRunning():
+        if not self._ensure_assistant_worker():
             return
+
+        self.start_task_requested.emit(command)
+
+    def _start_calibration(self) -> None:
+        """Ensure the assistant worker exists and trigger calibration."""
+
+        if not self._ensure_assistant_worker():
+            return
+
+        self.start_calibration_requested.emit()
+
+    def _ensure_assistant_worker(self) -> bool:
+        """Initialise the assistant worker thread if it is not already running."""
+
+        if self.assistant_thread is not None and self.assistant_thread.isRunning():
+            return False
 
         self.assistant_thread = QThread(self)
         self.assistant = DesktopAssistant()
         self.assistant.moveToThread(self.assistant_thread)
 
         self.start_task_requested.connect(self.assistant.start_task, Qt.QueuedConnection)
+        self.start_calibration_requested.connect(
+            self.assistant.start_calibration_task, Qt.QueuedConnection
+        )
         self.stop_task_requested.connect(self.assistant.request_stop, Qt.QueuedConnection)
         self.assistant.status_updated.connect(self.overlay.status_label.setText)
         self.assistant.progress_updated.connect(self.overlay.progress_bar.setValue)
@@ -151,7 +192,7 @@ class MainWindow(QMainWindow):
         self.assistant_thread.finished.connect(self._cleanup_assistant)
 
         self.assistant_thread.start()
-        self.start_task_requested.emit(command)
+        return True
 
     def _on_task_finished(self) -> None:
         """Handle assistant completion by restoring the main window."""
@@ -218,6 +259,12 @@ class MainWindow(QMainWindow):
         if self.assistant is not None:
             try:
                 self.start_task_requested.disconnect(self.assistant.start_task)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                self.start_calibration_requested.disconnect(
+                    self.assistant.start_calibration_task
+                )
             except (TypeError, RuntimeError):
                 pass
             try:

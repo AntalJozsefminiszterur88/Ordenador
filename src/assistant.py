@@ -215,6 +215,91 @@ class DesktopAssistant(QObject):
             self._stop_requested = False
             self._stop_notified = False
 
+    @Slot()
+    def start_calibration_task(self) -> None:
+        """Runs the automated calibration routine."""
+
+        self._reset_stop_state()
+        self._start_keyboard_listener()
+
+        self.progress_updated.emit(0)
+        self.status_updated.emit("Kalibráció indítása...")
+
+        try:
+            elements_to_calibrate = [
+                {"name": "Start Menü", "prompt": "a Windows Start Menü ikonja a tálcán"},
+                {
+                    "name": "Rendszertálca Óra",
+                    "prompt": "a rendszertálca területe, ahol az óra található",
+                },
+            ]
+
+            total_elements = len(elements_to_calibrate) or 1
+
+            for index, element in enumerate(elements_to_calibrate, start=1):
+                if self._check_for_stop():
+                    break
+
+                element_name = element["name"]
+                element_prompt = element["prompt"]
+
+                self.status_updated.emit(f"Kalibráció: '{element_name}' keresése...")
+                self.progress_updated.emit(int(((index - 1) / total_elements) * 100))
+
+                screen_info = self.computer_interface.get_screen_state(detail_level="high")
+                ai_action = self.ai_handler.get_calibration_coordinates(
+                    screen_info, element_prompt
+                )
+
+                if self._check_for_stop():
+                    break
+
+                if not isinstance(ai_action, dict):
+                    self.log_message.emit(
+                        f"❌ Sikertelen kalibráció a(z) '{element_name}' elemhez. Váratlan AI válasz."
+                    )
+                    continue
+
+                command = ai_action.get("command")
+                arguments = ai_action.get("arguments", {}) or {}
+
+                if command == "kattints":
+                    ai_coords = self._extract_coordinates(arguments)
+                    if ai_coords:
+                        real_coords = self._transform_coordinates(ai_coords, screen_info)
+                        self.memory_handler.save_element_location(element_name, real_coords)
+                        self.log_message.emit(
+                            f"✅ Elem kalibrálva: '{element_name}' -> {real_coords}"
+                        )
+                        try:
+                            self.computer_interface._display_click_indicator(
+                                real_coords["x"], real_coords["y"]
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        self.log_message.emit(
+                            f"❌ AI nem talált koordinátákat a(z) '{element_name}' elemhez."
+                        )
+                else:
+                    self.log_message.emit(
+                        f"❌ Sikertelen kalibráció a(z) '{element_name}' elemhez. AI válasza: {ai_action}"
+                    )
+
+                self.progress_updated.emit(int((index / total_elements) * 100))
+
+        finally:
+            self._stop_keyboard_listener()
+            self.progress_updated.emit(100)
+            if self._stop_requested:
+                self.log_message.emit("Kalibráció megszakítva.")
+                self.status_updated.emit("Kalibráció megszakítva.")
+            else:
+                self.status_updated.emit("Kalibráció befejezve.")
+            self.task_finished.emit()
+            self._stop_requested = False
+            self._stop_notified = False
+
     def _start_keyboard_listener(self) -> None:
         """Start the global keyboard listener to capture ESC presses."""
 
