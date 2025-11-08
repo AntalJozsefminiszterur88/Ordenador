@@ -22,6 +22,11 @@ class AIHandler:
         Fontos: Ha a kapott kép minősége túl alacsony ahhoz, hogy egy kritikus részletet
         (pl. egy gomb feliratát) elolvass, akkor ne tippelj! Használd a
         'kerj_jobb_minosegu_kepet' parancsot, és kérj egy részletesebb képet.
+        Minden lépés után kaphatsz visszajelzést az előző parancsod eredményéről. Ha egy
+        parancs sikertelen volt, KÖTELEZŐ egy másik stratégiát választanod! Például, ha az
+        'indits_programot' parancs elbukik, mert a program nem található, akkor a
+        következő lépésben próbáld meg vizuálisan megkeresni a program ikonját a képernyőn
+        a 'kattints' paranccsal.
         """
 
     def get_ai_decision(
@@ -30,6 +35,7 @@ class AIHandler:
         screen_state: str,
         available_plugins: list[dict[str, str]] | None = None,
         detail_level: str = "low",
+        feedback: str = "",
     ) -> dict:
         print("🧠 AI gondolkodik...")
         try:
@@ -41,6 +47,10 @@ class AIHandler:
                 ]
                 plugins_text = "\n".join(plugin_lines)
 
+            feedback_text = (
+                f"Visszajelzés az előző lépésről: {feedback}. " if feedback else ""
+            )
+
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -51,7 +61,7 @@ class AIHandler:
                             {
                                 "type": "text",
                                 "text": (
-                                    f"Feladat: '{user_prompt}'. A pluginek: {plugins_text}. "
+                                    f"Feladat: '{user_prompt}'. {feedback_text}A pluginek: {plugins_text}. "
                                     "Mi a következő lépés?"
                                 ),
                             },
