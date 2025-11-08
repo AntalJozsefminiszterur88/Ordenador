@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
 
 from pynput.keyboard import Key, Listener
 
 from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
 from src.context_handler import ContextHandler
-from src.gui.calibration_target import CalibrationTarget
+from src.gui.calibration_grid import CalibrationGrid
 from src.memory_handler import MemoryHandler
 from src.plugin_handler import PluginHandler
 from src.config import DEBUG_MODE
@@ -225,7 +225,7 @@ class DesktopAssistant(QObject):
 
     @Slot()
     def start_calibration_task(self) -> None:
-        """Runs the ACTIVE calibration routine by showing targets."""
+        """Runs the active grid-based calibration routine."""
 
         self._reset_stop_state()
         self._start_keyboard_listener()
@@ -233,79 +233,63 @@ class DesktopAssistant(QObject):
         self.progress_updated.emit(0)
         self.status_updated.emit("Kalibráció indítása...")
 
-        target_widget: CalibrationTarget | None = None
+        grid_widget: CalibrationGrid | None = None
 
         try:
-            target_widget = CalibrationTarget()
+            self.status_updated.emit("Kalibrációs rács előkészítése...")
+            self.progress_updated.emit(10)
 
-            test_points = [
-                (200, 200),
-                (self.computer_interface.screen_width - 200, 200),
-                (
-                    self.computer_interface.screen_width - 200,
-                    self.computer_interface.screen_height - 200,
-                ),
-                (200, self.computer_interface.screen_height - 200),
-            ]
+            grid_widget = CalibrationGrid()
+            grid_widget.showFullScreen()
+            time.sleep(0.5)
 
-            calibration_results: list[dict] = []
+            if self._check_for_stop():
+                return
 
-            for i, (real_x, real_y) in enumerate(test_points):
-                if self._check_for_stop():
-                    break
+            self.status_updated.emit("Képernyő elemzése...")
+            screen_info = self.computer_interface.get_screen_state(detail_level="high")
+            self.progress_updated.emit(30)
 
-                self.status_updated.emit(f"Kalibráció: {i + 1}. tesztpont mérése...")
-                self.progress_updated.emit(int((i / len(test_points)) * 100))
+            if self._check_for_stop():
+                return
 
-                target_widget.move(real_x, real_y)
-                target_widget.show()
-                QTimer.singleShot(0, target_widget.raise_)
-                time.sleep(0.3)
+            self.status_updated.emit("AI elemzi a rácsot...")
+            perceived_points = self.ai_handler.get_grid_calibration_points(screen_info)
+            self.progress_updated.emit(70)
 
-                screen_info = self.computer_interface.get_screen_state(detail_level="high")
-                ai_action = self.ai_handler.get_calibration_coordinates(
-                    screen_info, "piros kör"
+            if grid_widget:
+                grid_widget.hide()
+
+            if not perceived_points:
+                self.log_message.emit(
+                    "❌ Kalibráció sikertelen: Az AI nem tudta azonosítani a pontokat."
                 )
+                return
 
-                if not isinstance(ai_action, dict):
-                    self.log_message.emit(
-                        f"❌ Sikertelen bemérés a(z) {i + 1}. tesztponton. "
-                        "Váratlan AI válasz."
-                    )
-                    target_widget.hide()
-                    continue
-
-                target_widget.hide()
-
-                if ai_action.get("command") == "kattints":
-                    ai_coords = self._extract_coordinates(ai_action.get("arguments", {}))
-                    if ai_coords:
-                        self.log_message.emit(
-                            "✅ {idx}. pont bemérve. Valós: ({rx}, {ry}), AI látja: {coords}".format(
-                                idx=i + 1, rx=real_x, ry=real_y, coords=ai_coords
-                            )
-                        )
-                        calibration_results.append(
-                            {
-                                "real": {"x": real_x, "y": real_y},
-                                "perceived": ai_coords,
-                            }
-                        )
-                    else:
-                        self.log_message.emit(
-                            f"❌ AI nem talált koordinátákat a(z) {i + 1}. tesztponton."
-                        )
-                else:
-                    self.log_message.emit(
-                        f"❌ Sikertelen bemérés a(z) {i + 1}. tesztponton. AI válasza: {ai_action}"
+            real_points = grid_widget.points if grid_widget else {}
+            calibration_results = []
+            for p_point in perceived_points:
+                label = p_point.get("label") if isinstance(p_point, dict) else None
+                if label in real_points:
+                    calibration_results.append(
+                        {
+                            "real": {
+                                "x": real_points[label][0],
+                                "y": real_points[label][1],
+                            },
+                            "perceived": p_point.get("coords"),
+                        }
                     )
 
+            self.log_message.emit(
+                f"✅ AI által azonosított pontok: {len(calibration_results)} db"
+            )
             self._calculate_and_save_calibration(calibration_results)
 
         finally:
-            if target_widget is not None:
-                target_widget.hide()
-                target_widget.deleteLater()
+            if grid_widget:
+                grid_widget.hide()
+                grid_widget.deleteLater()
             self._stop_keyboard_listener()
             self.progress_updated.emit(100)
             if self._stop_requested:
@@ -465,23 +449,12 @@ class DesktopAssistant(QObject):
 
             return {"x": real_x, "y": real_y}
 
-        real_width = self.computer_interface.screen_width
-        real_height = self.computer_interface.screen_height
+        if self.log_message:
+            self.log_message.emit(
+                "⚠️ Nincs kalibrációs adat. Az AI koordinátáit változtatás nélkül használjuk."
+            )
 
-        image_dims = image_dims or {}
-        img_width = image_dims.get("width") if isinstance(image_dims, dict) else None
-        img_height = image_dims.get("height") if isinstance(image_dims, dict) else None
-
-        if not all([real_width, real_height, img_width, img_height]):
-            return ai_coords
-
-        scale_x = real_width / img_width
-        scale_y = real_height / img_height
-
-        real_x = int(float(ai_x) * scale_x)
-        real_y = int(float(ai_y) * scale_y)
-
-        return {"x": real_x, "y": real_y}
+        return {"x": int(ai_x), "y": int(ai_y)}
 
     def _handle_ai_action(self, ai_action: dict) -> dict:
         command = ai_action.get("command")
