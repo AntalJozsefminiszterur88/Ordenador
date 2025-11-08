@@ -8,6 +8,7 @@ import subprocess
 from collections.abc import Sequence
 
 import pyautogui
+from PIL import Image
 from PySide6.QtCore import QMetaObject, Qt
 from PySide6.QtGui import QGuiApplication
 
@@ -23,9 +24,14 @@ class ComputerInterface:
 
         try:
             screenshot = pyautogui.screenshot()
+
+            max_size = (1024, 1024)
+            screenshot.thumbnail(max_size, Image.Resampling.LANCZOS)
+
             buffer = io.BytesIO()
-            screenshot.save(buffer, format="PNG")
-            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            screenshot.save(buffer, format="JPEG", quality=80)
+            img_bytes = buffer.getvalue()
+            encoded = base64.b64encode(img_bytes).decode("ascii")
             return encoded
         except Exception as exc:  # pragma: no cover - vizuális környezet hiánya esetén
             print(f"Nem sikerült képernyőképet készíteni: {exc}")
