@@ -3,15 +3,18 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
+import time
+
+from PySide6.QtCore import QMetaObject, QObject, Qt, QTimer, Signal, Slot
 
 from pynput.keyboard import Key, Listener
 
 from src.ai_handler import AIHandler
 from src.computer_interface import ComputerInterface
-from src.plugin_handler import PluginHandler
-from src.memory_handler import MemoryHandler
 from src.context_handler import ContextHandler
+from src.gui.calibration_target import CalibrationTarget
+from src.memory_handler import MemoryHandler
+from src.plugin_handler import PluginHandler
 from src.config import DEBUG_MODE
 
 
@@ -222,7 +225,7 @@ class DesktopAssistant(QObject):
 
     @Slot()
     def start_calibration_task(self) -> None:
-        """Runs the automated calibration routine."""
+        """Runs the ACTIVE calibration routine by showing targets."""
 
         self._reset_stop_state()
         self._start_keyboard_listener()
@@ -230,70 +233,79 @@ class DesktopAssistant(QObject):
         self.progress_updated.emit(0)
         self.status_updated.emit("Kalibráció indítása...")
 
+        target_widget: CalibrationTarget | None = None
+
         try:
-            elements_to_calibrate = [
-                {"name": "Start Menü", "prompt": "a Windows Start Menü ikonja a tálcán"},
-                {
-                    "name": "Rendszertálca Óra",
-                    "prompt": "a rendszertálca területe, ahol az óra található",
-                },
+            target_widget = CalibrationTarget()
+
+            test_points = [
+                (200, 200),
+                (self.computer_interface.screen_width - 200, 200),
+                (
+                    self.computer_interface.screen_width - 200,
+                    self.computer_interface.screen_height - 200,
+                ),
+                (200, self.computer_interface.screen_height - 200),
             ]
 
-            total_elements = len(elements_to_calibrate) or 1
+            calibration_results: list[dict] = []
 
-            for index, element in enumerate(elements_to_calibrate, start=1):
+            for i, (real_x, real_y) in enumerate(test_points):
                 if self._check_for_stop():
                     break
 
-                element_name = element["name"]
-                element_prompt = element["prompt"]
+                self.status_updated.emit(f"Kalibráció: {i + 1}. tesztpont mérése...")
+                self.progress_updated.emit(int((i / len(test_points)) * 100))
 
-                self.status_updated.emit(f"Kalibráció: '{element_name}' keresése...")
-                self.progress_updated.emit(int(((index - 1) / total_elements) * 100))
+                target_widget.move(real_x, real_y)
+                target_widget.show()
+                QTimer.singleShot(0, target_widget.raise_)
+                time.sleep(0.3)
 
                 screen_info = self.computer_interface.get_screen_state(detail_level="high")
                 ai_action = self.ai_handler.get_calibration_coordinates(
-                    screen_info, element_prompt
+                    screen_info, "piros kör"
                 )
-
-                if self._check_for_stop():
-                    break
 
                 if not isinstance(ai_action, dict):
                     self.log_message.emit(
-                        f"❌ Sikertelen kalibráció a(z) '{element_name}' elemhez. Váratlan AI válasz."
+                        f"❌ Sikertelen bemérés a(z) {i + 1}. tesztponton. "
+                        "Váratlan AI válasz."
                     )
+                    target_widget.hide()
                     continue
 
-                command = ai_action.get("command")
-                arguments = ai_action.get("arguments", {}) or {}
+                target_widget.hide()
 
-                if command == "kattints":
-                    ai_coords = self._extract_coordinates(arguments)
+                if ai_action.get("command") == "kattints":
+                    ai_coords = self._extract_coordinates(ai_action.get("arguments", {}))
                     if ai_coords:
-                        real_coords = self._transform_coordinates(ai_coords, screen_info)
-                        self.memory_handler.save_element_location(element_name, real_coords)
                         self.log_message.emit(
-                            f"✅ Elem kalibrálva: '{element_name}' -> {real_coords}"
-                        )
-                        try:
-                            self.computer_interface._display_click_indicator(
-                                real_coords["x"], real_coords["y"]
+                            "✅ {idx}. pont bemérve. Valós: ({rx}, {ry}), AI látja: {coords}".format(
+                                idx=i + 1, rx=real_x, ry=real_y, coords=ai_coords
                             )
-                        except Exception:
-                            pass
+                        )
+                        calibration_results.append(
+                            {
+                                "real": {"x": real_x, "y": real_y},
+                                "perceived": ai_coords,
+                            }
+                        )
                     else:
                         self.log_message.emit(
-                            f"❌ AI nem talált koordinátákat a(z) '{element_name}' elemhez."
+                            f"❌ AI nem talált koordinátákat a(z) {i + 1}. tesztponton."
                         )
                 else:
                     self.log_message.emit(
-                        f"❌ Sikertelen kalibráció a(z) '{element_name}' elemhez. AI válasza: {ai_action}"
+                        f"❌ Sikertelen bemérés a(z) {i + 1}. tesztponton. AI válasza: {ai_action}"
                     )
 
-                self.progress_updated.emit(int((index / total_elements) * 100))
+            self._calculate_and_save_calibration(calibration_results)
 
         finally:
+            if target_widget is not None:
+                target_widget.hide()
+                target_widget.deleteLater()
             self._stop_keyboard_listener()
             self.progress_updated.emit(100)
             if self._stop_requested:
@@ -371,30 +383,96 @@ class DesktopAssistant(QObject):
         )
         return True
 
+    def _calculate_and_save_calibration(self, results: list) -> None:
+        """Calculates scaling factors from calibration data and saves them."""
+
+        if len(results) < 2:
+            self.log_message.emit("❌ Kalibráció sikertelen: nem sikerült elég pontot bemérni.")
+            return
+
+        valid_x_points: list[tuple[float, float]] = []
+        valid_y_points: list[tuple[float, float]] = []
+        scale_x_samples: list[float] = []
+        scale_y_samples: list[float] = []
+
+        for pair in results:
+            real = pair.get("real", {}) if isinstance(pair, dict) else {}
+            perceived = pair.get("perceived", {}) if isinstance(pair, dict) else {}
+
+            real_x = real.get("x")
+            real_y = real.get("y")
+            perceived_x = perceived.get("x")
+            perceived_y = perceived.get("y")
+
+            if isinstance(real_x, (int, float)) and isinstance(perceived_x, (int, float)):
+                valid_x_points.append((float(real_x), float(perceived_x)))
+                if perceived_x != 0:
+                    scale_x_samples.append(float(real_x) / float(perceived_x))
+
+            if isinstance(real_y, (int, float)) and isinstance(perceived_y, (int, float)):
+                valid_y_points.append((float(real_y), float(perceived_y)))
+                if perceived_y != 0:
+                    scale_y_samples.append(float(real_y) / float(perceived_y))
+
+        if not scale_x_samples or not scale_y_samples:
+            self.log_message.emit(
+                "❌ Kalibráció sikertelen: az arányokat nem lehetett kiszámolni."
+            )
+            return
+
+        avg_scale_x = sum(scale_x_samples) / len(scale_x_samples)
+        avg_scale_y = sum(scale_y_samples) / len(scale_y_samples)
+
+        offset_x_samples = [real - perceived * avg_scale_x for real, perceived in valid_x_points]
+        offset_y_samples = [real - perceived * avg_scale_y for real, perceived in valid_y_points]
+
+        avg_offset_x = sum(offset_x_samples) / len(offset_x_samples) if offset_x_samples else 0.0
+        avg_offset_y = sum(offset_y_samples) / len(offset_y_samples) if offset_y_samples else 0.0
+
+        calibration_data = {
+            "scale_x": avg_scale_x,
+            "scale_y": avg_scale_y,
+            "offset_x": avg_offset_x,
+            "offset_y": avg_offset_y,
+        }
+
+        self.memory_handler.save_element_location("__CALIBRATION_DATA__", calibration_data)
+        self.log_message.emit(
+            f"✅ Kalibráció sikeres! Mentett arányok: {calibration_data}"
+        )
+
     def _transform_coordinates(
-        self, ai_coords: dict, image_dims: dict
+        self, ai_coords: dict, image_dims: dict | None = None
     ) -> dict:
-        """Scales coordinates from the downscaled image to the real screen size."""
-
-        real_width = self.computer_interface.screen_width
-        real_height = self.computer_interface.screen_height
-
-        img_width = image_dims.get("width") if isinstance(image_dims, dict) else None
-        img_height = image_dims.get("height") if isinstance(image_dims, dict) else None
+        """Scales coordinates using pre-saved calibration data."""
 
         ai_x = ai_coords.get("x") if isinstance(ai_coords, dict) else None
         ai_y = ai_coords.get("y") if isinstance(ai_coords, dict) else None
 
-        if not all(
-            [
-                real_width,
-                real_height,
-                img_width,
-                img_height,
-                isinstance(ai_x, (int, float)),
-                isinstance(ai_y, (int, float)),
-            ]
-        ):
+        if not isinstance(ai_x, (int, float)) or not isinstance(ai_y, (int, float)):
+            return ai_coords
+
+        calibration_data = self.memory_handler.get_element_location("__CALIBRATION_DATA__")
+
+        if calibration_data:
+            scale_x = calibration_data.get("scale_x", 1.0)
+            scale_y = calibration_data.get("scale_y", 1.0)
+            offset_x = calibration_data.get("offset_x", 0.0)
+            offset_y = calibration_data.get("offset_y", 0.0)
+
+            real_x = int(float(ai_x) * float(scale_x) + float(offset_x))
+            real_y = int(float(ai_y) * float(scale_y) + float(offset_y))
+
+            return {"x": real_x, "y": real_y}
+
+        real_width = self.computer_interface.screen_width
+        real_height = self.computer_interface.screen_height
+
+        image_dims = image_dims or {}
+        img_width = image_dims.get("width") if isinstance(image_dims, dict) else None
+        img_height = image_dims.get("height") if isinstance(image_dims, dict) else None
+
+        if not all([real_width, real_height, img_width, img_height]):
             return ai_coords
 
         scale_x = real_width / img_width
