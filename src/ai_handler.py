@@ -18,6 +18,9 @@ class AIHandler:
         A 'kattints' parancs formátuma: '- 'kattints': {'x': <szám>, 'y': <szám>,
         'leiras': '<MIT LÁTSZ OTT?>'}. Ha vizuálisan azonosítasz egy elemet a
         képernyőn, KÖTELEZŐ megadnod a 'leiras' mezőt is!
+        Mindig kapsz egy lekicsinyített képet a teljes képernyőről. A válaszodban a
+        'kattints' parancs koordinátáit MINDIG ehhez a lekicsinyített képhez
+        viszonyítva, annak a koordináta-rendszerében add meg!
         A 'feladat_befejezve' parancsot akkor add vissza, ha a felhasználó kérése
         teljesült. Az argumentumban opcionálisan visszaadhatsz egy "uzenet" mezőt a
         felhasználónak szánt rövid visszajelzéssel. A 'kerj_jobb_minosegu_kepet'
@@ -35,7 +38,7 @@ class AIHandler:
     def get_ai_decision(
         self,
         user_prompt: str,
-        screen_state: str,
+        screen_info: dict | None,
         available_plugins: list[dict[str, str]] | None = None,
         detail_level: str = "low",
         feedback: str = "",
@@ -54,13 +57,18 @@ class AIHandler:
                 f"Visszajelzés az előző lépésről: {feedback}. " if feedback else ""
             )
 
+            image_data = screen_info.get("image_data", "") if isinstance(screen_info, dict) else ""
+            image_width = screen_info.get("width", 0) if isinstance(screen_info, dict) else 0
+            image_height = screen_info.get("height", 0) if isinstance(screen_info, dict) else 0
+
             if DEBUG_MODE:
                 print("\n--- AI PROMPT KÜLDÉSE ---")
                 print("SZÖVEGES PROMPT:")
                 print(f"    Feladat: '{user_prompt}'")
                 print(f"    Visszajelzés: '{feedback if feedback else 'Nincs'}'")
                 print(f"    Pluginek: {plugins_text}")
-                print(f"KÉP ADAT (hossz): {len(screen_state)} karakter")
+                print(f"KÉP ADAT (hossz): {len(image_data)} karakter")
+                print(f"    KÉP MÉRET: {image_width}x{image_height}")
                 print(f"KÉP MINŐSÉG: {detail_level}")
                 print("--------------------------")
 
@@ -74,14 +82,15 @@ class AIHandler:
                             {
                                 "type": "text",
                                 "text": (
-                                    f"Feladat: '{user_prompt}'. {feedback_text}A pluginek: {plugins_text}. "
+                                    f"Feladat: '{user_prompt}'. A mellékelt kép mérete {image_width}x{image_height} pixel. "
+                                    f"{feedback_text}A pluginek: {plugins_text}. "
                                     "Mi a következő lépés?"
                                 ),
                             },
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/jpeg;base64,{screen_state}",
+                                    "url": f"data:image/jpeg;base64,{image_data}",
                                     "detail": detail_level,
                                 },
                             },

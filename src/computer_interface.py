@@ -21,6 +21,10 @@ class ComputerInterface:
     def __init__(self) -> None:
         self._active_indicators: list[ClickIndicator] = []
         self.program_paths: dict[str, str | Sequence[str]] = {}
+        try:
+            self.screen_width, self.screen_height = pyautogui.size()
+        except Exception:  # pragma: no cover - környezeti korlátok
+            self.screen_width, self.screen_height = 0, 0
         self._load_program_paths()
 
     def _load_program_paths(self) -> None:
@@ -34,8 +38,8 @@ class ComputerInterface:
         except (json.JSONDecodeError, OSError) as exc:
             print(f"Hiba a programs.json betöltése közben: {exc}")
 
-    def get_screen_state(self, detail_level: str = "low") -> str:
-        """Készítsen teljes képernyőképet és adja vissza Base64 formátumban."""
+    def get_screen_state(self, detail_level: str = "low") -> dict:
+        """Készítsen teljes képernyőképet és adja vissza a lekicsinyített kép adatait."""
 
         try:
             screenshot = pyautogui.screenshot()
@@ -49,14 +53,20 @@ class ComputerInterface:
 
             screenshot.thumbnail(max_size, Image.Resampling.LANCZOS)
 
+            downscaled_width, downscaled_height = screenshot.size
+
             buffer = io.BytesIO()
             screenshot.save(buffer, format="JPEG", quality=quality)
             img_bytes = buffer.getvalue()
             encoded = base64.b64encode(img_bytes).decode("ascii")
-            return encoded
+            return {
+                "image_data": encoded,
+                "width": downscaled_width,
+                "height": downscaled_height,
+            }
         except Exception as exc:  # pragma: no cover - vizuális környezet hiánya esetén
             print(f"Nem sikerült képernyőképet készíteni: {exc}")
-            return ""
+            return {"image_data": "", "width": 0, "height": 0}
 
     def click_at(
         self,
